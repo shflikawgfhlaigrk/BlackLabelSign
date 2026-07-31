@@ -143,11 +143,13 @@ export default {
 
         if (m === 'POST' && sub === '/send') {
           if (envelope.status !== 'draft') return bad('already sent');
+          const body = await req.json().catch(() => ({}));
           const signers = await getSigners(env, envelope.id);
           const fields = await getFields(env, envelope.id);
           if (!signers.length) return bad('add at least one signer');
           for (const s of signers) {
-            if (!s.name || !/.+@.+\..+/.test(s.email)) return bad(`signer "${s.name || '?'}" needs a name and valid email`);
+            if (!s.name) return bad('every signer needs a name');
+            if (s.email && !/.+@.+\..+/.test(s.email)) return bad(`signer "${s.name}" has an invalid email`);
             if (!fields.some(f => f.signer_id === s.id && (f.type === 'signature' || f.type === 'initials')))
               return bad(`signer "${s.name}" has no signature field`);
           }
@@ -155,7 +157,7 @@ export default {
             env.DB.prepare('UPDATE signers SET token=? WHERE id=?').bind(uid() + uid(), s.id));
           stmts.push(env.DB.prepare("UPDATE envelopes SET status='sent', sent_at=? WHERE id=?").bind(now(), envelope.id));
           await env.DB.batch(stmts);
-          await audit(env, envelope.id, null, 'sent', req);
+          await audit(env, envelope.id, null, 'sent', req, String((body && body.note) || '').slice(0, 300));
           const fresh = await getSigners(env, envelope.id);
           return J({ ok: true, signers: fresh.map(s => ({ name: s.name, email: s.email, link: `${url.origin}/s/${s.token}` })) });
         }
@@ -329,7 +331,7 @@ async function finalize(env, envelope, req) {
   L(`https://sign.blacklabeltec.com/verify/${envelope.id}`, { gap: 10 });
   L('SIGNERS', { bold: true, gap: 4 });
   for (const s of signers) {
-    L(`${s.order_index + 1}. ${s.name} <${s.email}>`, { bold: true });
+    L(`${s.order_index + 1}. ${s.name}${s.email ? ` <${s.email}>` : ''}`, { bold: true });
     L(`   Consented to electronic records & signatures (${CONSENT_VERSION}): ${s.consent_at || '-'}`);
     L(`   Signed: ${s.signed_at || '-'}   IP: ${s.ip || '-'}`);
     L(`   Device: ${(s.ua || '-').slice(0, 95)}`, { size: 8, gap: 5 });
