@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BL Sign — Editor</title><link rel="stylesheet" href="/assets/app.css"></head>
+<body><div class="wrap">
+<div class="topbar">
+  <a href="/admin" class="muted" style="text-decoration:none">← Envelopes</a>
+  <h1 id="etitle" class="grow" style="font-size:18px"></h1>
+  <span id="echip"></span>
+  <button class="ghost" id="save" style="display:none">Save</button>
+  <button id="send" style="display:none">Send for signature</button>
+</div>
+
+<div class="card" id="signercard">
+  <h3 style="margin-top:0">Signers <span class="muted small">(sign in order listed)</span></h3>
+  <div id="signers"></div>
+  <button class="ghost" id="addsigner" style="margin-top:8px">+ Add signer</button>
+</div>
+
+<div class="card" id="palette" style="display:none">
+  <div class="row pal">
+    <span class="muted small">Place for:</span>
+    <select id="whofor" style="width:auto"></select>
+    <span class="muted small" style="margin-left:8px">Field:</span>
+    <button class="ghost" data-place="signature">✍ Signature</button>
+    <button class="ghost" data-place="initials">Initials</button>
+    <button class="ghost" data-place="date">Date</button>
+    <button class="ghost" data-place="text">Text</button>
+    <button class="ghost" data-place="checkbox">Checkbox</button>
+    <span id="placemsg" class="gold small"></span>
+  </div>
+</div>
+
+<div id="links" class="card" style="display:none">
+  <h3 style="margin-top:0">Signing links</h3>
+  <div id="linkrows"></div>
+  <p class="muted small">Send each signer their own link. Links are single-recipient and audit-logged.</p>
+</div>
+
+<div id="pages"></div>
+</div>
+<div class="toast" id="toast"></div>
+<script type="module" src="/assets/editor.js"></script>
+</body></html>

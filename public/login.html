@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BL Sign — Login</title><link rel="stylesheet" href="/assets/app.css"></head>
+<body><div class="wrap narrow">
+<div class="card" style="margin-top:14vh">
+  <h1><span class="gold">BL</span> Sign</h1>
+  <p class="muted" style="margin:6px 0 18px">Black Label e-signature. Admin access.</p>
+  <div class="row">
+    <input id="tok" type="password" placeholder="Admin token" class="grow" autofocus>
+    <button id="go">Enter</button>
+  </div>
+  <p id="err" class="muted small" style="margin-top:10px"></p>
+</div></div>
+<script>
+const go = async () => {
+  const r = await fetch('/api/login', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ token: document.getElementById('tok').value.trim() }) });
+  if (r.ok) location.href = '/admin'; else document.getElementById('err').textContent = 'Invalid token.';
+};
+document.getElementById('go').onclick = go;
+document.getElementById('tok').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+</script></body></html>

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BL Sign — Envelopes</title><link rel="stylesheet" href="/assets/app.css"></head>
+<body><div class="wrap">
+<div class="topbar">
+  <h1><span class="gold">BL</span> Sign</h1>
+  <span class="sp"></span>
+  <button class="ghost" id="logout">Log out</button>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">New envelope</h3>
+  <div class="row">
+    <input id="title" placeholder='Title (e.g. "Services Agreement — Acme")' class="grow">
+    <input id="file" type="file" accept="application/pdf" style="max-width:280px">
+    <button id="create">Create</button>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Envelopes</h3>
+  <table id="tbl"><thead><tr>
+    <th>Title</th><th>Status</th><th>Signed</th><th>Created</th><th></th>
+  </tr></thead><tbody></tbody></table>
+  <p id="empty" class="muted" style="display:none;margin-top:10px">Nothing yet — create your first envelope above.</p>
+</div>
+</div>
+<div class="toast" id="toast"></div>
+<script src="/assets/admin.js"></script>
+</body></html>
