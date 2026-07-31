@@ -33,6 +33,7 @@ async function init() {
   }
   if (!d.signer.consented) {
     $('#ctitle').textContent = d.title;
+    $('#csender').textContent = 'Sent by ' + d.sender;
     $('#consentcard').style.display = '';
     $('#agree').onchange = e => $('#continue').disabled = !e.target.checked;
     $('#continue').onclick = async () => {
@@ -198,11 +199,13 @@ $('#finish').onclick = async () => {
   const d = await r.json();
   if (!r.ok) { toast(d.error || 'Failed'); $('#finish').disabled = false; return; }
   $('#doccard').style.display = 'none';
+  const upsell = `<p class="muted small" style="margin-top:18px">Signed free with <a href="/">BL Sign</a> — send your own documents at
+    <a href="/">sign.blacklabeltec.com</a>. Custom tools for your business: <a href="https://blacklabeltec.com">blacklabeltec.com</a></p>`;
   if (d.completed)
     statusCard(`<h1>✓ All done</h1><p class="muted" style="margin:8px 0 14px">Everyone has signed. Your copy is ready.</p>
-      <a class="btn" href="/api/session/${token}/download">Download signed PDF</a>`);
+      <a class="btn" href="/api/session/${token}/download">Download signed PDF</a>${upsell}`);
   else
-    statusCard(`<h1>✓ Signed</h1><p class="muted">Thanks — ${esc(d.next)} signs next. Once everyone has signed, this same link lets you download the completed PDF.</p>`);
+    statusCard(`<h1>✓ Signed</h1><p class="muted">Thanks — ${esc(d.next)} signs next. Once everyone has signed, this same link lets you download the completed PDF.</p>${upsell}`);
 };
 
 init();

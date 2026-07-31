@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My envelopes — BL Sign</title><link rel="stylesheet" href="/assets/app.css"></head>
+<body><div class="wrap">
+<div class="topbar">
+  <a href="/" class="muted" style="text-decoration:none">← BL Sign</a>
+  <h1>My envelopes</h1>
+  <span class="sp"></span>
+  <span id="who" class="muted small"></span>
+</div>
+<div class="card">
+  <table id="tbl"><thead><tr><th>Title</th><th>Status</th><th>Signed</th><th>Created</th><th></th></tr></thead><tbody></tbody></table>
+  <p id="empty" class="muted" style="display:none">No envelopes yet — <a href="/">send your first one</a>.</p>
+</div>
+<p class="muted small">Built by <a href="https://blacklabeltec.com">Black Label Technologies</a> — need custom tools, automation, or AI systems? <a href="https://blacklabeltec.com">Talk to us</a>.</p>
+</div>
+<script>
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+(async () => {
+  const r = await fetch('/api/public/envelopes');
+  if (!r.ok) { location.href = '/'; return; }
+  const d = await r.json();
+  document.getElementById('who').textContent = d.sender.name + ' · ' + d.sender.email;
+  const tb = document.querySelector('#tbl tbody');
+  document.getElementById('empty').style.display = d.envelopes.length ? 'none' : 'block';
+  for (const e of d.envelopes) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><a href="/e/${e.id}">${esc(e.title)}</a></td>
+      <td><span class="chip ${e.status}">${e.status}</span></td>
+      <td>${e.n_signed}/${e.n_signers}</td>
+      <td class="muted">${new Date(e.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</td>
+      <td>${e.status === 'completed' ? `<a class="btn ghost" href="/api/envelopes/${e.id}/final" target="_blank">Signed PDF</a>` : `<a class="btn ghost" href="/e/${e.id}">Open</a>`}</td>`;
+    tb.appendChild(tr);
+  }
+})();
+</script></body></html>

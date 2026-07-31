@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BL Sign — Free e-signatures</title>
+<meta name="description" content="Send documents for signature free. Upload a PDF, place fields, share a link. Full audit certificate and tamper-evident hashes.">
+<link rel="stylesheet" href="/assets/app.css"></head>
+<body><div class="wrap narrow">
+<div style="margin-top:9vh">
+  <h1 style="font-size:34px"><span class="gold">BL</span> Sign</h1>
+  <p style="font-size:19px;margin-top:10px">Send documents for signature. <span class="gold">Free.</span></p>
+  <p class="muted" style="margin-top:8px">Upload a PDF, place signature fields, share a link. Every completed
+  document gets a burned-in certificate — signer identity, timestamps, IP, and a tamper-evident SHA-256
+  you can verify publicly. No subscription. No per-envelope fees.</p>
+</div>
+
+<div class="card" id="startcard">
+  <h3 style="margin-top:0">Start free</h3>
+  <div class="row" style="flex-direction:column;align-items:stretch;gap:10px">
+    <input id="name" placeholder="Your name" autocomplete="name">
+    <input id="email" type="email" placeholder="you@company.com" autocomplete="email">
+    <button id="start">Send my first document</button>
+  </div>
+  <p id="err" class="muted small" style="margin-top:8px"></p>
+</div>
+
+<div class="card" id="upcard" style="display:none">
+  <h3 style="margin-top:0">New envelope <span class="muted small" id="hello"></span></h3>
+  <div class="row" style="flex-direction:column;align-items:stretch;gap:10px">
+    <input id="title" placeholder='Document title (e.g. "Consulting Agreement")'>
+    <input id="file" type="file" accept="application/pdf">
+    <button id="create">Upload &amp; place fields</button>
+  </div>
+  <p class="muted small" style="margin-top:10px">Free tier: 3 envelopes/day · 15MB · up to 8 signers.
+  <a href="/me">My envelopes →</a></p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">How it works</h3>
+  <p class="small" style="line-height:2">
+  <b>1.</b> Upload your PDF and click where signatures, dates, and initials go.<br>
+  <b>2.</b> Add signers — each gets a private signing link you share however you like (text, email, Slack).<br>
+  <b>3.</b> Signers consent (ESIGN/UETA), sign by drawing or typing, and everyone gets the sealed PDF
+  with a certificate of completion and a public verification page.</p>
+</div>
+
+<p class="muted small" style="margin:26px 0 40px">
+  Built by <a href="https://blacklabeltec.com">Black Label Technologies</a> — custom software, automation,
+  and AI systems for businesses. Want a tool like this built for you?
+  <a href="https://blacklabeltec.com">Talk to us</a>.
+  &nbsp;·&nbsp; <a href="mailto:michael@blacklabelbots.com?subject=BL%20Sign%20abuse%20report">Report abuse</a>
+</p>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+async function checkSession() {
+  const r = await fetch('/api/public/envelopes');
+  if (r.ok) {
+    const d = await r.json();
+    $('#startcard').style.display = 'none';
+    $('#upcard').style.display = '';
+    $('#hello').textContent = '— ' + d.sender.name;
+  }
+}
+$('#start').onclick = async () => {
+  const r = await fetch('/api/public/start', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: $('#name').value, email: $('#email').value }) });
+  const d = await r.json();
+  if (!r.ok) { $('#err').textContent = d.error || 'Try again'; return; }
+  $('#startcard').style.display = 'none';
+  $('#upcard').style.display = '';
+  $('#hello').textContent = '— ' + d.name;
+};
+$('#create').onclick = async () => {
+  const f = $('#file').files[0];
+  if (!$('#title').value.trim() || !f) { $('#err').textContent = 'Title and a PDF are required'; return; }
+  const fd = new FormData();
+  fd.append('title', $('#title').value.trim());
+  fd.append('file', f);
+  $('#create').disabled = true;
+  const r = await fetch('/api/public/envelopes', { method: 'POST', body: fd });
+  const d = await r.json();
+  $('#create').disabled = false;
+  if (!r.ok) { alert(d.error || 'Upload failed'); return; }
+  location.href = '/e/' + d.id;
+};
+checkSession();
+</script></body></html>

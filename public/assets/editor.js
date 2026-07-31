@@ -15,7 +15,7 @@ let pageEls = [];          // {overlay, W, H}
 
 async function init() {
   const r = await fetch(`/api/envelopes/${envId}`);
-  if (r.status === 401) { location.href = '/admin'; return; }
+  if (r.status === 401) { location.href = location.pathname.startsWith('/admin') ? '/admin' : '/'; return; }
   const d = await r.json();
   const e = d.envelope;
   editable = e.status === 'draft';

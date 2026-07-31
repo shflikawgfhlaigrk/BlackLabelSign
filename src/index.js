@@ -25,6 +25,16 @@ function isAdmin(req, env) {
   return !!(m && env.ADMIN_TOKEN && m[1] === env.ADMIN_TOKEN);
 }
 
+async function senderFromReq(req, env) {
+  const h = req.headers.get('x-sender-token') || '';
+  const m = (req.headers.get('cookie') || '').match(/(?:^|;\s*)blsender=([^;]+)/);
+  const tok = h || (m && m[1]);
+  if (!tok) return null;
+  return env.DB.prepare('SELECT * FROM senders WHERE token=?').bind(tok).first();
+}
+const canAccess = (envelope, admin, sender) =>
+  admin || !!(sender && envelope.sender_id && envelope.sender_id === sender.id);
+
 async function audit(env, envelopeId, signerId, type, req, detail = '') {
   await env.DB.prepare('INSERT INTO events (id, envelope_id, signer_id, type, ts, ip, ua, detail) VALUES (?,?,?,?,?,?,?,?)')
     .bind(uid(), envelopeId, signerId, type, now(),
@@ -47,7 +57,9 @@ export default {
     const m = req.method;
     try {
       // ---------- pages ----------
-      if (m === 'GET' && p === '/') return Response.redirect(url.origin + '/admin', 302);
+      if (m === 'GET' && p === '/') return serveAsset(env, url, '/landing.html');
+      if (m === 'GET' && p === '/me') return serveAsset(env, url, '/me.html');
+      if (m === 'GET' && /^\/e\/[a-f0-9]+$/.test(p)) return serveAsset(env, url, '/editor.html');
       if (m === 'GET' && p === '/admin') return serveAsset(env, url, isAdmin(req, env) ? '/admin.html' : '/login.html');
       if (m === 'GET' && /^\/admin\/env\/[a-f0-9]+$/.test(p))
         return serveAsset(env, url, isAdmin(req, env) ? '/editor.html' : '/login.html');
@@ -68,9 +80,66 @@ export default {
       if (m === 'POST' && p === '/api/logout')
         return J({ ok: true }, 200, { 'set-cookie': 'blsign=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0' });
 
-      // ---------- admin API ----------
+      // ---------- public self-serve senders ----------
+      if (m === 'POST' && p === '/api/public/start') {
+        const b = await req.json().catch(() => ({}));
+        const name = String(b.name || '').trim().slice(0, 120);
+        const email = String(b.email || '').trim().toLowerCase().slice(0, 200);
+        if (!name || !/.+@.+\..+/.test(email)) return bad('name and a valid email are required');
+        const ip = req.headers.get('cf-connecting-ip') || '';
+        const today = now().slice(0, 10);
+        const nIp = (await env.DB.prepare('SELECT COUNT(*) c FROM senders WHERE ip=? AND created_at>=?').bind(ip, today).first()).c;
+        if (nIp >= 10) return bad('daily limit reached for this network — try tomorrow', 429);
+        const sid = uid(), stok = uid() + uid();
+        await env.DB.prepare('INSERT INTO senders (id,name,email,token,ip,created_at) VALUES (?,?,?,?,?,?)')
+          .bind(sid, name, email, stok, ip, now()).run();
+        return J({ ok: true, name }, 200, {
+          'set-cookie': `blsender=${stok}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=31536000`,
+        });
+      }
+      if (p === '/api/public/envelopes') {
+        const sender = await senderFromReq(req, env);
+        if (!sender) return bad('unauthorized', 401);
+        if (m === 'GET') {
+          const rows = (await env.DB.prepare(`
+            SELECT e.id, e.title, e.status, e.created_at,
+              (SELECT COUNT(*) FROM signers s WHERE s.envelope_id=e.id) AS n_signers,
+              (SELECT COUNT(*) FROM signers s WHERE s.envelope_id=e.id AND s.status='signed') AS n_signed
+            FROM envelopes e WHERE e.sender_id=? ORDER BY e.created_at DESC`).bind(sender.id).all()).results;
+          return J({ sender: { name: sender.name, email: sender.email }, envelopes: rows });
+        }
+        if (m === 'POST') {
+          const today = now().slice(0, 10);
+          const nEnv = (await env.DB.prepare(
+            'SELECT COUNT(*) c FROM envelopes e JOIN senders s ON e.sender_id=s.id WHERE s.email=? AND e.created_at>=?')
+            .bind(sender.email, today).first()).c;
+          if (nEnv >= 3) return bad('free tier: 3 envelopes per day — need more? blacklabeltec.com', 429);
+          const form = await req.formData();
+          const file = form.get('file');
+          const title = String(form.get('title') || '').trim();
+          if (!title) return bad('title required');
+          if (!file || typeof file === 'string') return bad('file required');
+          const bytes = await file.arrayBuffer();
+          if (bytes.byteLength > MAX_PDF) return bad('PDF too large (15MB max)');
+          if (new TextDecoder().decode(bytes.slice(0, 5)) !== '%PDF-') return bad('not a PDF');
+          const id = uid();
+          const key = `orig/${id}.pdf`;
+          await env.DOCS.put(key, bytes, { httpMetadata: { contentType: 'application/pdf' } });
+          await env.DB.prepare('INSERT INTO envelopes (id,title,status,created_at,original_key,original_sha256,sender_id) VALUES (?,?,?,?,?,?,?)')
+            .bind(id, title, 'draft', now(), key, await sha256hex(bytes), sender.id).run();
+          await audit(env, id, null, 'created', req, `public sender ${sender.name} <${sender.email}>`);
+          return J({ id });
+        }
+        return bad('not found', 404);
+      }
+
+      // ---------- envelope API (admin, or the public sender who owns it) ----------
       if (p.startsWith('/api/envelopes')) {
-        if (!isAdmin(req, env)) return bad('unauthorized', 401);
+        const admin = isAdmin(req, env);
+        const sender = admin ? null : await senderFromReq(req, env);
+        if (!admin && !sender) return bad('unauthorized', 401);
+
+        if ((m === 'POST' || m === 'GET') && p === '/api/envelopes' && !admin) return bad('unauthorized', 401);
 
         if (m === 'POST' && p === '/api/envelopes') {
           const form = await req.formData();
@@ -103,6 +172,7 @@ export default {
         if (!em) return bad('not found', 404);
         const envelope = await getEnvelope(env, em[1]);
         if (!envelope) return bad('not found', 404);
+        if (!canAccess(envelope, admin, sender)) return bad('unauthorized', 401);
         const sub = em[2] || '';
 
         if (m === 'GET' && sub === '') {
@@ -196,9 +266,12 @@ export default {
           if (envelope.status !== 'voided' && signer.status !== 'signed') await audit(env, envelope.id, signer.id, 'viewed', req);
           const fields = (await getFields(env, envelope.id)).filter(f => f.signer_id === signer.id)
             .map(f => ({ id: f.id, type: f.type, page: f.page, x: f.x, y: f.y, w: f.w, h: f.h, required: f.required, value: f.value }));
+          const senderRow = envelope.sender_id
+            ? await env.DB.prepare('SELECT name,email FROM senders WHERE id=?').bind(envelope.sender_id).first() : null;
           return J({
             title: envelope.title, status: envelope.status,
-            sender: 'Black Label Technologies', consentVersion: CONSENT_VERSION,
+            sender: senderRow ? `${senderRow.name} (${senderRow.email} — unverified)` : 'Black Label Technologies',
+            consentVersion: CONSENT_VERSION,
             signer: { name: signer.name, email: signer.email, status: signer.status, consented: !!signer.consent_at },
             myTurn, waitingOn: waitingOn && waitingOn.id !== signer.id ? waitingOn.name : null,
             fields,
@@ -324,7 +397,11 @@ async function finalize(env, envelope, req) {
   L('Black Label Sign — sign.blacklabeltec.com', { size: 9, gray: true, gap: 10 });
   L(`Envelope ID: ${envelope.id}`);
   L(`Title: ${envelope.title}`);
-  L('Sender: Black Label Technologies <michael@blacklabelbots.com>');
+  const senderRow = envelope.sender_id
+    ? await env.DB.prepare('SELECT name,email FROM senders WHERE id=?').bind(envelope.sender_id).first() : null;
+  L(senderRow
+    ? `Sender: ${senderRow.name} <${senderRow.email}> (self-serve; email unverified)`
+    : 'Sender: Black Label Technologies <michael@blacklabelbots.com>');
   L(`Created: ${envelope.created_at}   Sent: ${envelope.sent_at || '-'}   Completed: ${completedAt}`);
   L(`Original document SHA-256: ${envelope.original_sha256}`, { size: 8 });
   L('The SHA-256 of this signed file and its live status are recorded at:');
