@@ -12,6 +12,11 @@
   <table id="tbl"><thead><tr><th>Title</th><th>Status</th><th>Signed</th><th>Created</th><th></th></tr></thead><tbody></tbody></table>
   <p id="empty" class="muted" style="display:none">No envelopes yet — <a href="/">send your first one</a>.</p>
 </div>
+<div class="card" id="tplcard" style="display:none">
+  <h3 style="margin-top:0">My templates</h3>
+  <table id="tpltbl"><thead><tr><th>Name</th><th>Pages</th><th></th></tr></thead><tbody></tbody></table>
+  <p class="muted small">Open any envelope and hit "Save as template" to reuse its layout.</p>
+</div>
 <p class="muted small">Built by <a href="https://blacklabeltec.com">Black Label Technologies</a> — need custom tools, automation, or AI systems? <a href="https://blacklabeltec.com">Talk to us</a>.</p>
 </div>
 <script>
@@ -31,6 +36,24 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
       <td class="muted">${new Date(e.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</td>
       <td>${e.status === 'completed' ? `<a class="btn ghost" href="/api/envelopes/${e.id}/final" target="_blank">Signed PDF</a>` : `<a class="btn ghost" href="/e/${e.id}">Open</a>`}</td>`;
     tb.appendChild(tr);
+  }
+  const tr2 = await fetch('/api/templates');
+  if (tr2.ok) {
+    const { templates } = await tr2.json();
+    if (templates.length) {
+      document.getElementById('tplcard').style.display = '';
+      const tb2 = document.querySelector('#tpltbl tbody');
+      tb2.innerHTML = templates.map(t => `<tr><td>${esc(t.name)}</td><td>${t.pages || '—'}</td>
+        <td><button data-use="${t.id}">Use</button> <button class="ghost" data-del="${t.id}">Delete</button></td></tr>`).join('');
+      tb2.querySelectorAll('[data-use]').forEach(b => b.onclick = async () => {
+        const res = await fetch(`/api/templates/${b.dataset.use}/use`, { method: 'POST' });
+        const dd = await res.json();
+        if (res.ok) location.href = `/e/${dd.id}`; else alert(dd.error || 'Failed');
+      });
+      tb2.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+        await fetch(`/api/templates/${b.dataset.del}`, { method: 'DELETE' }); location.reload();
+      });
+    }
   }
 })();
 </script></body></html>

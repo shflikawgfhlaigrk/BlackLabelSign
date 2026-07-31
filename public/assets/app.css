@@ -28,6 +28,9 @@ table.kv td:first-child { color:var(--mut); width:180px; }
 .chip.sent { color:#e7c66a; border-color:#5a4a1a; background:#241d08; }
 .chip.completed { color:#7fe0a7; border-color:#1d4a2e; background:#0b2415; }
 .chip.voided { color:#f0888c; border-color:#5c2226; background:#240b0d; }
+.chip.declined { color:#f0888c; border-color:#5c2226; background:#240b0d; }
+.chip.expired { color:#c9b08a; border-color:#4a3d1a; background:#201a08; }
+.chip.stale { color:#c9b08a; border-color:#4a3d1a; background:#201a08; }
 .toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:#1c1c20; border:1px solid var(--gold); color:var(--txt); padding:10px 20px; border-radius:10px; opacity:0; transition:.25s; pointer-events:none; z-index:60; }
 .toast.show { opacity:1; }
 /* pdf pages + field overlays */

@@ -69,7 +69,13 @@ function addSecurityHeaders(res, path) {
 // stranding the envelope in 'sent' forever.
 async function ensureFinalized(env, envelope, req) {
   if (envelope.status !== 'sent') return envelope;
-  const unsigned = await env.DB.prepare("SELECT COUNT(*) c FROM signers WHERE envelope_id=? AND status!='signed'")
+  if (envelope.expires_at && envelope.expires_at < now()) {
+    await env.DB.prepare("UPDATE envelopes SET status='expired' WHERE id=? AND status='sent'").bind(envelope.id).run();
+    await audit(env, envelope.id, null, 'expired', null);
+    return getEnvelope(env, envelope.id);
+  }
+  const unsigned = await env.DB.prepare(
+    "SELECT COUNT(*) c FROM signers WHERE envelope_id=? AND role='signer' AND status!='signed'")
     .bind(envelope.id).first();
   if (unsigned.c > 0) return envelope;
   try { await finalize(env, envelope, req); } catch (e) {
@@ -199,6 +205,91 @@ export default {
         return bad('not found', 404);
       }
 
+      // ---------- templates (reusable field layouts + recipients) ----------
+      if (p.startsWith('/api/templates')) {
+        const admin = isAdmin(req, env);
+        const sender = admin ? null : await senderFromReq(req, env);
+        if (!admin && !sender) return bad('unauthorized', 401);
+        const owns = t => admin || (sender && t.sender_id === sender.id);
+
+        if (m === 'GET' && p === '/api/templates') {
+          const rows = admin
+            ? (await env.DB.prepare('SELECT id,name,pages,created_at,sender_id FROM templates ORDER BY created_at DESC').all()).results
+            : (await env.DB.prepare('SELECT id,name,pages,created_at FROM templates WHERE sender_id=? ORDER BY created_at DESC').bind(sender.id).all()).results;
+          return J({ templates: rows });
+        }
+
+        if (m === 'POST' && p === '/api/templates') {
+          const b = await req.json().catch(() => ({}));
+          const srcEnv = await getEnvelope(env, String(b.envelope_id || ''));
+          if (!srcEnv || !canAccess(srcEnv, admin, sender)) return bad('envelope not found', 404);
+          const name = clean(String(b.name || srcEnv.title)).slice(0, 120) || 'Template';
+          if (sender) {
+            const n = (await env.DB.prepare('SELECT COUNT(*) c FROM templates WHERE sender_id=?').bind(sender.id).first()).c;
+            if (n >= 5) return bad('free tier: 5 templates max');
+          }
+          const signers = await getSigners(env, srcEnv.id);
+          const fields = await getFields(env, srcEnv.id);
+          const sIndex = Object.fromEntries(signers.map((s, i) => [s.id, i]));
+          const tid = uid();
+          const src = await env.DOCS.get(srcEnv.original_key);
+          const head = await env.DOCS.head(srcEnv.original_key);
+          await env.DOCS.put(`tpl/${tid}.pdf`, await src.arrayBuffer(),
+            { httpMetadata: { contentType: 'application/pdf' }, customMetadata: head?.customMetadata || {} });
+          await env.DB.prepare('INSERT INTO templates (id,name,sender_id,key,sha256,pages,roles_json,fields_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
+            .bind(tid, name, sender ? sender.id : null, `tpl/${tid}.pdf`, srcEnv.original_sha256,
+              parseInt(head?.customMetadata?.pages || '0', 10) || 0,
+              JSON.stringify(signers.map(s => ({ name: s.name, email: s.email, role: s.role || 'signer' }))),
+              JSON.stringify(fields.map(f => ({ signer_index: sIndex[f.signer_id], type: f.type, page: f.page, x: f.x, y: f.y, w: f.w, h: f.h }))),
+              now()).run();
+          return J({ id: tid });
+        }
+
+        const tm = p.match(/^\/api\/templates\/([a-f0-9]+)(\/[a-z]+)?$/);
+        if (!tm) return bad('not found', 404);
+        const tpl = await env.DB.prepare('SELECT * FROM templates WHERE id=?').bind(tm[1]).first();
+        if (!tpl || !owns(tpl)) return bad('not found', 404);
+
+        if (m === 'DELETE' && !tm[2]) {
+          await env.DOCS.delete(tpl.key);
+          await env.DB.prepare('DELETE FROM templates WHERE id=?').bind(tpl.id).run();
+          return J({ ok: true });
+        }
+
+        if (m === 'POST' && tm[2] === '/use') {
+          if (sender) {
+            const today = now().slice(0, 10);
+            const nEnv = (await env.DB.prepare(
+              'SELECT COUNT(*) c FROM envelopes e JOIN senders s ON e.sender_id=s.id WHERE s.email=? AND e.created_at>=?')
+              .bind(sender.email, today).first()).c;
+            if (nEnv >= 3) return bad('free tier: 3 envelopes per day — need more? blacklabeltec.com', 429);
+          }
+          const id = uid();
+          const key = `orig/${id}.pdf`;
+          const src = await env.DOCS.get(tpl.key);
+          const head = await env.DOCS.head(tpl.key);
+          const bytes = await src.arrayBuffer();
+          await env.DOCS.put(key, bytes,
+            { httpMetadata: { contentType: 'application/pdf' }, customMetadata: head?.customMetadata || {} });
+          const stmts = [env.DB.prepare('INSERT INTO envelopes (id,title,status,created_at,original_key,original_sha256,sender_id) VALUES (?,?,?,?,?,?,?)')
+            .bind(id, `${tpl.name} — ${now().slice(0, 10)}`, 'draft', now(), key, await sha256hex(bytes), sender ? sender.id : null)];
+          const roles = JSON.parse(tpl.roles_json);
+          const newIds = roles.map(() => uid());
+          roles.forEach((r, i) => stmts.push(
+            env.DB.prepare('INSERT INTO signers (id,envelope_id,name,email,order_index,status,role) VALUES (?,?,?,?,?,?,?)')
+              .bind(newIds[i], id, r.name, r.email || '', i, 'pending', r.role === 'cc' ? 'cc' : 'signer')));
+          for (const f of JSON.parse(tpl.fields_json)) {
+            if (f.signer_index == null || !newIds[f.signer_index]) continue;
+            stmts.push(env.DB.prepare('INSERT INTO fields (id,envelope_id,signer_id,type,page,x,y,w,h,required) VALUES (?,?,?,?,?,?,?,?,?,?)')
+              .bind(uid(), id, newIds[f.signer_index], f.type, f.page | 0, f.x, f.y, f.w, f.h, f.type === 'checkbox' ? 0 : 1));
+          }
+          await env.DB.batch(stmts);
+          await audit(env, id, null, 'created', req, `from template ${tpl.name}`);
+          return J({ id });
+        }
+        return bad('not found', 404);
+      }
+
       // ---------- envelope API (admin, or the public sender who owns it) ----------
       if (p.startsWith('/api/envelopes')) {
         const admin = isAdmin(req, env);
@@ -264,15 +355,19 @@ export default {
             env.DB.prepare('DELETE FROM signers WHERE envelope_id=?').bind(envelope.id),
           ];
           const signerIds = [];
+          const roles = [];
           body.signers.forEach((s, i) => {
             const sid = uid();
+            const role = s.role === 'cc' ? 'cc' : 'signer';
             signerIds.push(sid);
-            stmts.push(env.DB.prepare('INSERT INTO signers (id,envelope_id,name,email,order_index,status) VALUES (?,?,?,?,?,?)')
-              .bind(sid, envelope.id, String(s.name || '').trim().slice(0, 120), String(s.email || '').trim().slice(0, 200), i, 'pending'));
+            roles.push(role);
+            stmts.push(env.DB.prepare('INSERT INTO signers (id,envelope_id,name,email,order_index,status,role) VALUES (?,?,?,?,?,?,?)')
+              .bind(sid, envelope.id, String(s.name || '').trim().slice(0, 120), String(s.email || '').trim().slice(0, 200), i, 'pending', role));
           });
           for (const f of body.fields) {
             const si = f.signer_index | 0;
             if (si < 0 || si >= signerIds.length) return bad('field assigned to unknown signer');
+            if (roles[si] === 'cc') return bad('CC recipients cannot have fields');
             if (!['signature', 'initials', 'date', 'text', 'checkbox'].includes(f.type)) return bad('bad field type');
             const num = v => Math.max(0, Math.min(1, Number(v) || 0));
             stmts.push(env.DB.prepare('INSERT INTO fields (id,envelope_id,signer_id,type,page,x,y,w,h,required) VALUES (?,?,?,?,?,?,?,?,?,?)')
@@ -287,20 +382,52 @@ export default {
           const body = await req.json().catch(() => ({}));
           const signers = await getSigners(env, envelope.id);
           const fields = await getFields(env, envelope.id);
-          if (!signers.length) return bad('add at least one signer');
+          if (!signers.some(s => (s.role || 'signer') === 'signer')) return bad('add at least one signer (not just CC)');
           for (const s of signers) {
-            if (!s.name) return bad('every signer needs a name');
-            if (s.email && !/.+@.+\..+/.test(s.email)) return bad(`signer "${s.name}" has an invalid email`);
-            if (!fields.some(f => f.signer_id === s.id && (f.type === 'signature' || f.type === 'initials')))
+            if (!s.name) return bad('every recipient needs a name');
+            if (s.email && !/.+@.+\..+/.test(s.email)) return bad(`recipient "${s.name}" has an invalid email`);
+            if ((s.role || 'signer') === 'signer' &&
+              !fields.some(f => f.signer_id === s.id && (f.type === 'signature' || f.type === 'initials')))
               return bad(`signer "${s.name}" has no signature field`);
           }
+          const routing = body.routing === 'parallel' ? 'parallel' : 'sequential';
+          const expireDays = [7, 14, 30].includes(body.expireDays | 0) ? body.expireDays | 0 : 0;
+          const expiresAt = expireDays ? new Date(Date.now() + expireDays * 86400_000).toISOString() : null;
           const stmts = signers.map(s =>
             env.DB.prepare('UPDATE signers SET token=? WHERE id=?').bind(uid() + uid(), s.id));
-          stmts.push(env.DB.prepare("UPDATE envelopes SET status='sent', sent_at=? WHERE id=?").bind(now(), envelope.id));
+          stmts.push(env.DB.prepare("UPDATE envelopes SET status='sent', sent_at=?, routing=?, expires_at=? WHERE id=?")
+            .bind(now(), routing, expiresAt, envelope.id));
           await env.DB.batch(stmts);
           await audit(env, envelope.id, null, 'sent', req, String((body && body.note) || '').slice(0, 300));
           const fresh = await getSigners(env, envelope.id);
           return J({ ok: true, signers: fresh.map(s => ({ name: s.name, email: s.email, link: `${url.origin}/s/${s.token}` })) });
+        }
+
+        if (m === 'POST' && sub === '/adddoc') {
+          if (envelope.status !== 'draft') return bad('documents can only be added while draft');
+          const docs = JSON.parse(envelope.docs_json || 'null') || [{ name: 'Document 1', sha256: envelope.original_sha256 }];
+          if (docs.length >= 5) return bad('max 5 documents per envelope');
+          const form = await req.formData();
+          const file = form.get('file');
+          if (!file || typeof file === 'string') return bad('file required');
+          const bytes = await file.arrayBuffer();
+          const v = await validatePdf(bytes);
+          if (typeof v === 'string') return bad(v);
+          const origObj = await env.DOCS.get(envelope.original_key);
+          const merged = await PDFDocument.create();
+          for (const src of [await origObj.arrayBuffer(), bytes]) {
+            const d = await PDFDocument.load(src);
+            (await merged.copyPages(d, d.getPageIndices())).forEach(pg => merged.addPage(pg));
+          }
+          const out = await merged.save();
+          if (out.byteLength > MAX_PDF * 2) return bad('combined document too large');
+          docs.push({ name: clean(String(form.get('name') || file.name || `Document ${docs.length + 1}`)).slice(0, 80), sha256: await sha256hex(bytes) });
+          await env.DOCS.put(envelope.original_key, out,
+            { httpMetadata: { contentType: 'application/pdf' }, customMetadata: { pages: String(merged.getPageCount()) } });
+          await env.DB.prepare('UPDATE envelopes SET original_sha256=?, docs_json=? WHERE id=?')
+            .bind(await sha256hex(out), JSON.stringify(docs), envelope.id).run();
+          await audit(env, envelope.id, null, 'doc-added', req, docs[docs.length - 1].name);
+          return J({ ok: true, pages: merged.getPageCount() });
         }
 
         if (m === 'POST' && sub === '/void') {
@@ -330,9 +457,12 @@ export default {
         envelope = await ensureFinalized(env, envelope, req);
         const sub = sm[2] || '';
         const all = await getSigners(env, envelope.id);
-        const myTurn = envelope.status === 'sent' && signer.status !== 'signed' &&
-          all.every(s => s.order_index >= signer.order_index || s.status === 'signed');
-        const waitingOn = all.find(s => s.status !== 'signed');
+        const signersOnly = all.filter(s => (s.role || 'signer') === 'signer');
+        const isViewer = (signer.role || 'signer') === 'cc';
+        const myTurn = !isViewer && envelope.status === 'sent' && signer.status === 'pending' &&
+          (envelope.routing === 'parallel' ||
+            signersOnly.every(s => s.order_index >= signer.order_index || s.status === 'signed'));
+        const waitingOn = signersOnly.find(s => s.status !== 'signed');
 
         if (m === 'GET' && sub === '') {
           if (envelope.status !== 'voided' && signer.status !== 'signed') await audit(env, envelope.id, signer.id, 'viewed', req);
@@ -343,11 +473,24 @@ export default {
           return J({
             title: envelope.title, status: envelope.status,
             sender: senderRow ? `${senderRow.name} (${senderRow.email} — unverified)` : 'Black Label Technologies',
-            consentVersion: CONSENT_VERSION,
+            consentVersion: CONSENT_VERSION, viewer: isViewer, routing: envelope.routing,
+            expiresAt: envelope.expires_at || null,
             signer: { name: signer.name, email: signer.email, status: signer.status, consented: !!signer.consent_at },
             myTurn, waitingOn: waitingOn && waitingOn.id !== signer.id ? waitingOn.name : null,
             fields,
           });
+        }
+
+        if (m === 'POST' && sub === '/decline') {
+          if (!myTurn) return bad('not your turn or already signed');
+          const b = await req.json().catch(() => ({}));
+          const reason = clean(b.reason || '').slice(0, 300);
+          const claim = await env.DB.prepare("UPDATE signers SET status='declined' WHERE id=? AND status='pending'")
+            .bind(signer.id).run();
+          if (!claim.meta.changes) return bad('already acted', 409);
+          await env.DB.prepare("UPDATE envelopes SET status='declined' WHERE id=? AND status='sent'").bind(envelope.id).run();
+          await audit(env, envelope.id, signer.id, 'declined', req, reason);
+          return J({ ok: true });
         }
 
         if (m === 'GET' && sub === '/pdf') {
@@ -399,7 +542,7 @@ export default {
             .bind(now(), req.headers.get('cf-connecting-ip') || '', (req.headers.get('user-agent') || '').slice(0, 300), signer.id).run();
           if (!claim.meta.changes) return bad('already signed', 409);
           await audit(env, envelope.id, signer.id, 'signed', req);
-          const remaining = await env.DB.prepare("SELECT name FROM signers WHERE envelope_id=? AND status!='signed' ORDER BY order_index").bind(envelope.id).all();
+          const remaining = await env.DB.prepare("SELECT name FROM signers WHERE envelope_id=? AND role='signer' AND status!='signed' ORDER BY order_index").bind(envelope.id).all();
           if (remaining.results.length === 0) {
             try { await finalize(env, envelope, req); }
             catch (e) {
@@ -486,15 +629,26 @@ async function finalize(env, envelope, req) {
     ? `Sender: ${senderRow.name} <${senderRow.email}> (self-serve; email unverified)`
     : 'Sender: Black Label Technologies <michael@blacklabelbots.com>');
   L(`Created: ${envelope.created_at}   Sent: ${envelope.sent_at || '-'}   Completed: ${completedAt}`);
+  L(`Routing: ${envelope.routing || 'sequential'}${envelope.expires_at ? `   Expires: ${envelope.expires_at}` : ''}`);
   L(`Original document SHA-256: ${envelope.original_sha256}`, { size: 8 });
+  const docParts = JSON.parse(envelope.docs_json || 'null');
+  if (docParts && docParts.length > 1) {
+    L(`Combined from ${docParts.length} documents:`, { size: 8.5 });
+    for (const dp of docParts) L(`   ${dp.name} — sha256 ${dp.sha256}`, { size: 7.5 });
+  }
   L('The SHA-256 of this signed file and its live status are recorded at:');
   L(`https://sign.blacklabeltec.com/verify/${envelope.id}`, { gap: 10 });
   L('SIGNERS', { bold: true, gap: 4 });
-  for (const s of signers) {
+  for (const s of signers.filter(x => (x.role || 'signer') === 'signer')) {
     L(`${s.order_index + 1}. ${s.name}${s.email ? ` <${s.email}>` : ''}`, { bold: true });
     L(`   Consented to electronic records & signatures (${CONSENT_VERSION}): ${s.consent_at || '-'}`);
     L(`   Signed: ${s.signed_at || '-'}   IP: ${s.ip || '-'}`);
     L(`   Device: ${(s.ua || '-').slice(0, 95)}`, { size: 8, gap: 5 });
+  }
+  const ccs = signers.filter(x => x.role === 'cc');
+  if (ccs.length) {
+    L('COPIED (CC — received the completed document, no signature required)', { bold: true, gap: 4 });
+    for (const s of ccs) L(`   ${s.name}${s.email ? ` <${s.email}>` : ''}`, { size: 8.5 });
   }
   L('EVENT LOG', { bold: true, gap: 4 });
   const byId = Object.fromEntries(signers.map(s => [s.id, s.name]));
@@ -529,7 +683,11 @@ async function verifyPage(env, id) {
   envelope = await ensureFinalized(env, envelope, null);
   const signers = await getSigners(env, id);
   const rows = signers.map(s =>
-    `<tr><td>${esc(s.name)}</td><td>${s.status === 'signed' ? '✓ signed' : s.status}</td><td>${esc(s.signed_at || '—')}</td></tr>`).join('');
+    `<tr><td>${esc(s.name)}${s.role === 'cc' ? ' <span class="muted small">(cc)</span>' : ''}</td><td>${s.status === 'signed' ? '✓ signed' : esc(s.status)}</td><td>${esc(s.signed_at || '—')}</td></tr>`).join('');
+  const docParts = JSON.parse(envelope.docs_json || 'null');
+  const partsRows = docParts && docParts.length > 1
+    ? `<h3>Source documents</h3><table class="kv">${docParts.map(dp =>
+        `<tr><td>${esc(dp.name)}</td><td class="mono small">${esc(dp.sha256)}</td></tr>`).join('')}</table>` : '';
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Verify — BL Sign</title><link rel="stylesheet" href="/assets/app.css"></head><body>
 <div class="wrap narrow"><div class="card">
@@ -545,6 +703,7 @@ async function verifyPage(env, id) {
 <tr><td>Signed-file SHA-256</td><td class="mono small">${esc(envelope.final_sha256 || '— (not completed)')}</td></tr>
 </table>
 <h3>Signers</h3><table class="kv">${rows}</table>
+${partsRows}
 <p class="muted small">To verify a copy of the signed document, compute its SHA-256
 (<span class="mono">shasum -a 256 file.pdf</span>) and compare it to the hash above.</p>
 </div></div></body></html>`;

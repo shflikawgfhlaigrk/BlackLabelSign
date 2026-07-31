@@ -21,13 +21,18 @@ async function init() {
   editable = e.status === 'draft';
   $('#etitle').textContent = e.title;
   $('#echip').innerHTML = `<span class="chip ${e.status}">${e.status}</span>`;
-  signers = d.signers.map(s => ({ name: s.name, email: s.email }));
+  signers = d.signers.map(s => ({ name: s.name, email: s.email, role: s.role || 'signer' }));
+  if (e.routing) $('#routing').value = e.routing;
   const idToIndex = Object.fromEntries(d.signers.map((s, i) => [s.id, i]));
   fields = d.fields.map(f => ({ signer_index: idToIndex[f.signer_id] ?? 0, type: f.type, page: f.page, x: f.x, y: f.y, w: f.w, h: f.h }));
   if (!signers.length && editable) signers.push({ name: '', email: '' });
 
   if (editable) { $('#save').style.display = ''; $('#send').style.display = ''; $('#palette').style.display = ''; }
-  else $('#addsigner').style.display = 'none';
+  else {
+    $('#addsigner').style.display = 'none';
+    $('#echip').insertAdjacentHTML('afterend', '<button class="ghost" id="savetpl2">Save as template</button>');
+    $('#savetpl2').onclick = () => $('#savetpl').onclick();
+  }
 
   if (d.signers.some(s => s.link)) showLinks(d.signers.map(s => ({ name: s.name, email: s.email, link: s.link, status: s.status })), e);
   renderSigners();
@@ -42,13 +47,24 @@ function renderSigners() {
     const row = document.createElement('div');
     row.className = 'row';
     row.style.marginTop = '8px';
-    row.innerHTML = `<span class="chip ${'s' + (i % 4) === 's0' ? '' : ''}" style="border-color:currentColor;color:${['#c9a227','#4f8ff7','#3ecf8e','#e46f6f'][i % 4]}">${i + 1}</span>
+    row.innerHTML = `<span class="chip" style="border-color:currentColor;color:${['#c9a227','#4f8ff7','#3ecf8e','#e46f6f'][i % 4]}">${i + 1}</span>
       <input placeholder="Full name" value="${esc(s.name)}" data-i="${i}" data-k="name" class="grow" ${editable ? '' : 'disabled'}>
       <input placeholder="email@domain.com" value="${esc(s.email)}" data-i="${i}" data-k="email" class="grow" ${editable ? '' : 'disabled'}>
+      <select data-i="${i}" data-k="role" style="width:auto" ${editable ? '' : 'disabled'}>
+        <option value="signer"${s.role !== 'cc' ? ' selected' : ''}>Signer</option>
+        <option value="cc"${s.role === 'cc' ? ' selected' : ''}>CC (copy)</option>
+      </select>
       ${editable && signers.length > 1 ? `<button class="ghost" data-rm="${i}">×</button>` : ''}`;
     box.appendChild(row);
   });
-  box.querySelectorAll('input').forEach(inp => inp.oninput = () => { signers[inp.dataset.i][inp.dataset.k] = inp.value; syncWhofor(); });
+  box.querySelectorAll('input,select[data-k]').forEach(inp => inp.oninput = () => {
+    signers[inp.dataset.i][inp.dataset.k] = inp.value;
+    if (inp.dataset.k === 'role' && inp.value === 'cc') {
+      fields = fields.filter(f => f.signer_index !== +inp.dataset.i);
+      renderFields();
+    }
+    syncWhofor();
+  });
   box.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
     const i = +b.dataset.rm;
     fields = fields.filter(f => f.signer_index !== i).map(f => ({ ...f, signer_index: f.signer_index > i ? f.signer_index - 1 : f.signer_index }));
@@ -60,7 +76,7 @@ function renderSigners() {
 function syncWhofor() {
   const sel = $('#whofor');
   const cur = sel.value;
-  sel.innerHTML = signers.map((s, i) => `<option value="${i}">${esc(s.name || 'Signer ' + (i + 1))}</option>`).join('');
+  sel.innerHTML = signers.map((s, i) => s.role === 'cc' ? '' : `<option value="${i}">${esc(s.name || 'Signer ' + (i + 1))}</option>`).join('');
   if (cur && +cur < signers.length) sel.value = cur;
 }
 $('#addsigner').onclick = () => { signers.push({ name: '', email: '' }); renderSigners(); };
@@ -165,9 +181,35 @@ async function save(silent) {
 }
 $('#save').onclick = () => save(false);
 
+$('#adddoc').onclick = () => $('#adddocfile').click();
+$('#adddocfile').onchange = async () => {
+  const f = $('#adddocfile').files[0];
+  if (!f) return;
+  if (!await save(true)) return;
+  const fd = new FormData();
+  fd.append('file', f);
+  fd.append('name', f.name);
+  const r = await fetch(`/api/envelopes/${envId}/adddoc`, { method: 'POST', body: fd });
+  const d = await r.json();
+  if (!r.ok) { toast(d.error || 'Add failed'); return; }
+  toast(`Document added — now ${d.pages} pages`);
+  setTimeout(() => location.reload(), 700);
+};
+$('#savetpl').onclick = async () => {
+  const name = prompt('Template name:', document.getElementById('etitle').textContent);
+  if (!name) return;
+  if (editable && !await save(true)) return;
+  const r = await fetch('/api/templates', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ envelope_id: envId, name }) });
+  const d = await r.json();
+  toast(r.ok ? 'Template saved' : (d.error || 'Failed'));
+};
 $('#send').onclick = async () => {
   if (!await save(true)) return;
-  const r = await fetch(`/api/envelopes/${envId}/send`, { method: 'POST' });
+  const r = await fetch(`/api/envelopes/${envId}/send`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ routing: $('#routing').value, expireDays: +$('#expiry').value }),
+  });
   const d = await r.json();
   if (!r.ok) { toast(d.error || 'Send failed'); return; }
   toast('Envelope sent — links ready');

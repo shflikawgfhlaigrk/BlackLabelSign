@@ -18,9 +18,18 @@ async function init() {
   $('#who').textContent = `${d.signer.name} · ${d.signer.email}`;
 
   if (d.status === 'voided') { statusCard('<h1>This envelope was voided</h1><p class="muted">Contact the sender if you believe this is an error.</p>'); return; }
+  if (d.status === 'declined') { statusCard('<h1>Envelope declined</h1><p class="muted">A recipient declined to sign, which closed this envelope. Contact the sender to restart.</p>'); return; }
+  if (d.status === 'expired') { statusCard('<h1>Envelope expired</h1><p class="muted">The signing window for this document has passed. Contact the sender to reissue it.</p>'); return; }
   if (d.status === 'completed') {
     statusCard(`<h1>✓ Completed</h1><p class="muted" style="margin:8px 0 14px">Everyone has signed “${esc(d.title)}”.</p>
       <a class="btn" href="/api/session/${token}/download">Download signed PDF</a>`);
+    return;
+  }
+  if (d.viewer) {
+    $('#decline').style.display = 'none';
+    $('#finish').style.display = 'none';
+    $('#dsub').textContent = "You're receiving a copy (CC) — no signature required. This link becomes your download once everyone signs.";
+    showDoc();
     return;
   }
   if (d.signer.status === 'signed') {
@@ -48,6 +57,7 @@ async function init() {
 async function showDoc() {
   $('#doccard').style.display = '';
   $('#dtitle').textContent = session.title;
+  if (session.expiresAt) $('#dsub').textContent += ` Expires ${new Date(session.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}.`;
   const doc = await pdfjsLib.getDocument({ url: `/api/session/${token}/pdf` }).promise;
   const container = $('#pages');
   const maxW = Math.min(860, container.clientWidth || 860);
@@ -190,6 +200,19 @@ $('#sigadopt').onclick = () => {
   checkDone();
 };
 
+$('#decline').onclick = async () => {
+  const reason = prompt('Decline to sign — tell the sender why (optional):');
+  if (reason === null) return;
+  if (!confirm('Decline this envelope? This closes it for all recipients.')) return;
+  const r = await fetch(`/api/session/${token}/decline`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  });
+  const d = await r.json();
+  if (!r.ok) { toast(d.error || 'Failed'); return; }
+  $('#doccard').style.display = 'none';
+  statusCard('<h1>Declined</h1><p class="muted">The sender has been notified in the audit log. Nothing was signed.</p>');
+};
 $('#finish').onclick = async () => {
   $('#finish').disabled = true;
   const r = await fetch(`/api/session/${token}/complete`, {

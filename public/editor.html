@@ -28,6 +28,16 @@
     <button class="ghost" data-place="checkbox">Checkbox</button>
     <span id="placemsg" class="gold small"></span>
   </div>
+  <div class="row" style="margin-top:12px">
+    <span class="muted small">Routing:</span>
+    <select id="routing" style="width:auto"><option value="sequential">In order</option><option value="parallel">All at once</option></select>
+    <span class="muted small" style="margin-left:8px">Expires:</span>
+    <select id="expiry" style="width:auto"><option value="0">Never</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select>
+    <span class="grow"></span>
+    <input type="file" id="adddocfile" accept="application/pdf" style="display:none">
+    <button class="ghost" id="adddoc">+ Add document</button>
+    <button class="ghost" id="savetpl">Save as template</button>
+  </div>
 </div>
 
 <div id="links" class="card" style="display:none">
