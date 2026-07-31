@@ -50,8 +50,59 @@ async function serveAsset(env, url, path) {
   return env.ASSETS.fetch(new URL(path, url.origin).toString());
 }
 
+const NOINDEX = [/^\/s\//, /^\/e\//, /^\/admin/, /^\/verify\//, /^\/me$/, /^\/api\//];
+function addSecurityHeaders(res, path) {
+  const h = new Headers(res.headers);
+  h.set('x-content-type-options', 'nosniff');
+  h.set('referrer-policy', 'no-referrer');
+  h.set('x-frame-options', 'DENY');
+  h.set('content-security-policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self'; " +
+    "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+  if (NOINDEX.some(r => r.test(path))) h.set('x-robots-tag', 'noindex, nofollow');
+  return new Response(res.body, { status: res.status, headers: h });
+}
+
+// Retry-safe completion: if everyone signed but a prior finalize attempt crashed
+// (corrupt asset, transient error), any later read re-runs it instead of
+// stranding the envelope in 'sent' forever.
+async function ensureFinalized(env, envelope, req) {
+  if (envelope.status !== 'sent') return envelope;
+  const unsigned = await env.DB.prepare("SELECT COUNT(*) c FROM signers WHERE envelope_id=? AND status!='signed'")
+    .bind(envelope.id).first();
+  if (unsigned.c > 0) return envelope;
+  try { await finalize(env, envelope, req); } catch (e) {
+    console.error('finalize retry failed', envelope.id, e && e.stack || e);
+    return envelope;
+  }
+  return getEnvelope(env, envelope.id);
+}
+
+const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const isPng = b => b.length > 8 && PNG_MAGIC.every((v, i) => b[i] === v);
+
+async function validatePdf(bytes) {
+  if (bytes.byteLength > MAX_PDF) return 'PDF too large (15MB max)';
+  if (new TextDecoder().decode(bytes.slice(0, 5)) !== '%PDF-') return 'not a PDF';
+  try {
+    const doc = await PDFDocument.load(bytes, { throwOnInvalidObject: true });
+    const pages = doc.getPageCount();
+    if (pages < 1) return 'PDF has no pages';
+    return { pages };
+  } catch {
+    return 'PDF could not be parsed (corrupt or password-protected)';
+  }
+}
+
 export default {
   async fetch(req, env) {
+    const path = new URL(req.url).pathname;
+    const res = await this.route(req, env);
+    return addSecurityHeaders(res, path);
+  },
+
+  async route(req, env) {
     const url = new URL(req.url);
     const p = url.pathname;
     const m = req.method;
@@ -66,13 +117,25 @@ export default {
       if (m === 'GET' && /^\/s\/[A-Za-z0-9]+$/.test(p)) return serveAsset(env, url, '/sign.html');
       if (m === 'GET' && p.startsWith('/assets/')) return env.ASSETS.fetch(req);
       if (m === 'GET' && p === '/favicon.ico') return new Response(null, { status: 204 });
+      if (m === 'GET' && p === '/robots.txt')
+        return new Response('User-agent: *\nDisallow: /s/\nDisallow: /e/\nDisallow: /admin\nDisallow: /verify/\nDisallow: /me\nDisallow: /api/\n',
+          { headers: { 'content-type': 'text/plain' } });
 
       if (m === 'GET' && /^\/verify\/[a-f0-9]+$/.test(p)) return verifyPage(env, p.split('/').pop());
 
       // ---------- auth ----------
       if (m === 'POST' && p === '/api/login') {
+        const ip = req.headers.get('cf-connecting-ip') || '';
+        const hourAgo = new Date(Date.now() - 3600_000).toISOString();
+        const fails = (await env.DB.prepare(
+          "SELECT COUNT(*) c FROM events WHERE envelope_id='auth' AND type='login-failed' AND ip=? AND ts>=?")
+          .bind(ip, hourAgo).first()).c;
+        if (fails >= 10) return bad('too many attempts — try later', 429);
         const body = await req.json().catch(() => ({}));
-        if (!env.ADMIN_TOKEN || body.token !== env.ADMIN_TOKEN) return bad('nope', 403);
+        if (!env.ADMIN_TOKEN || body.token !== env.ADMIN_TOKEN) {
+          await audit(env, 'auth', null, 'login-failed', req);
+          return bad('nope', 403);
+        }
         return J({ ok: true }, 200, {
           'set-cookie': `blsign=${env.ADMIN_TOKEN}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000`,
         });
@@ -114,17 +177,20 @@ export default {
             'SELECT COUNT(*) c FROM envelopes e JOIN senders s ON e.sender_id=s.id WHERE s.email=? AND e.created_at>=?')
             .bind(sender.email, today).first()).c;
           if (nEnv >= 3) return bad('free tier: 3 envelopes per day — need more? blacklabeltec.com', 429);
+          const nGlobal = (await env.DB.prepare(
+            'SELECT COUNT(*) c FROM envelopes WHERE sender_id IS NOT NULL AND created_at>=?').bind(today).first()).c;
+          if (nGlobal >= 200) return bad('high demand today — try again tomorrow', 429);
           const form = await req.formData();
           const file = form.get('file');
           const title = String(form.get('title') || '').trim();
           if (!title) return bad('title required');
           if (!file || typeof file === 'string') return bad('file required');
           const bytes = await file.arrayBuffer();
-          if (bytes.byteLength > MAX_PDF) return bad('PDF too large (15MB max)');
-          if (new TextDecoder().decode(bytes.slice(0, 5)) !== '%PDF-') return bad('not a PDF');
+          const v = await validatePdf(bytes);
+          if (typeof v === 'string') return bad(v);
           const id = uid();
           const key = `orig/${id}.pdf`;
-          await env.DOCS.put(key, bytes, { httpMetadata: { contentType: 'application/pdf' } });
+          await env.DOCS.put(key, bytes, { httpMetadata: { contentType: 'application/pdf' }, customMetadata: { pages: String(v.pages) } });
           await env.DB.prepare('INSERT INTO envelopes (id,title,status,created_at,original_key,original_sha256,sender_id) VALUES (?,?,?,?,?,?,?)')
             .bind(id, title, 'draft', now(), key, await sha256hex(bytes), sender.id).run();
           await audit(env, id, null, 'created', req, `public sender ${sender.name} <${sender.email}>`);
@@ -148,11 +214,11 @@ export default {
           if (!title) return bad('title required');
           if (!file || typeof file === 'string') return bad('file required');
           const bytes = await file.arrayBuffer();
-          if (bytes.byteLength > MAX_PDF) return bad('PDF too large (15MB max)');
-          if (new TextDecoder().decode(bytes.slice(0, 5)) !== '%PDF-') return bad('not a PDF');
+          const v = await validatePdf(bytes);
+          if (typeof v === 'string') return bad(v);
           const id = uid();
           const key = `orig/${id}.pdf`;
-          await env.DOCS.put(key, bytes, { httpMetadata: { contentType: 'application/pdf' } });
+          await env.DOCS.put(key, bytes, { httpMetadata: { contentType: 'application/pdf' }, customMetadata: { pages: String(v.pages) } });
           await env.DB.prepare('INSERT INTO envelopes (id,title,status,created_at,original_key,original_sha256) VALUES (?,?,?,?,?,?)')
             .bind(id, title, 'draft', now(), key, await sha256hex(bytes)).run();
           await audit(env, id, null, 'created', req, title);
@@ -170,9 +236,10 @@ export default {
 
         const em = p.match(/^\/api\/envelopes\/([a-f0-9]+)(\/[a-z]+)?$/);
         if (!em) return bad('not found', 404);
-        const envelope = await getEnvelope(env, em[1]);
+        let envelope = await getEnvelope(env, em[1]);
         if (!envelope) return bad('not found', 404);
         if (!canAccess(envelope, admin, sender)) return bad('unauthorized', 401);
+        envelope = await ensureFinalized(env, envelope, req);
         const sub = em[2] || '';
 
         if (m === 'GET' && sub === '') {
@@ -188,6 +255,10 @@ export default {
           const body = await req.json().catch(() => null);
           if (!body || !Array.isArray(body.signers) || !Array.isArray(body.fields)) return bad('signers[] and fields[] required');
           if (body.signers.length > 8 || body.fields.length > 200) return bad('too many signers/fields');
+          const head = await env.DOCS.head(envelope.original_key);
+          const pageCount = parseInt(head?.customMetadata?.pages || '0', 10) || 0;
+          if (pageCount && body.fields.some(f => (f.page | 0) >= pageCount))
+            return bad(`field placed on a page past the end of the document (${pageCount} pages)`);
           const stmts = [
             env.DB.prepare('DELETE FROM fields WHERE envelope_id=?').bind(envelope.id),
             env.DB.prepare('DELETE FROM signers WHERE envelope_id=?').bind(envelope.id),
@@ -254,8 +325,9 @@ export default {
       if (sm) {
         const signer = await env.DB.prepare('SELECT * FROM signers WHERE token=?').bind(sm[1]).first();
         if (!signer) return bad('invalid or expired link', 404);
-        const envelope = await getEnvelope(env, signer.envelope_id);
+        let envelope = await getEnvelope(env, signer.envelope_id);
         if (!envelope) return bad('not found', 404);
+        envelope = await ensureFinalized(env, envelope, req);
         const sub = sm[2] || '';
         const all = await getSigners(env, envelope.id);
         const myTurn = envelope.status === 'sent' && signer.status !== 'signed' &&
@@ -304,9 +376,11 @@ export default {
             if (f.type === 'signature' || f.type === 'initials') {
               const png = typeof v.png === 'string' ? v.png : '';
               if (!png.startsWith('data:image/png;base64,')) { if (f.required) return bad(`missing ${f.type}`); continue; }
-              const b64 = png.slice(22);
-              const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+              let bin;
+              try { bin = Uint8Array.from(atob(png.slice(22)), c => c.charCodeAt(0)); }
+              catch { return bad('signature image is not valid base64'); }
               if (bin.byteLength > MAX_SIG_PNG) return bad('signature image too large');
+              if (!isPng(bin)) return bad('signature image must be a PNG');
               await env.DOCS.put(`sig/${f.id}.png`, bin, { httpMetadata: { contentType: 'image/png' } });
               stmts.push(env.DB.prepare('UPDATE fields SET value=? WHERE id=?').bind('png', f.id));
             } else if (f.type === 'checkbox') {
@@ -317,13 +391,21 @@ export default {
               stmts.push(env.DB.prepare('UPDATE fields SET value=? WHERE id=?').bind(t, f.id));
             }
           }
-          stmts.push(env.DB.prepare("UPDATE signers SET status='signed', signed_at=?, ip=?, ua=? WHERE id=?")
-            .bind(now(), req.headers.get('cf-connecting-ip') || '', (req.headers.get('user-agent') || '').slice(0, 300), signer.id));
-          await env.DB.batch(stmts);
+          if (stmts.length) await env.DB.batch(stmts);
+          // Optimistic claim — a double-submit (two tabs, retry) loses here instead of
+          // double-logging and double-finalizing.
+          const claim = await env.DB.prepare(
+            "UPDATE signers SET status='signed', signed_at=?, ip=?, ua=? WHERE id=? AND status!='signed'")
+            .bind(now(), req.headers.get('cf-connecting-ip') || '', (req.headers.get('user-agent') || '').slice(0, 300), signer.id).run();
+          if (!claim.meta.changes) return bad('already signed', 409);
           await audit(env, envelope.id, signer.id, 'signed', req);
           const remaining = await env.DB.prepare("SELECT name FROM signers WHERE envelope_id=? AND status!='signed' ORDER BY order_index").bind(envelope.id).all();
           if (remaining.results.length === 0) {
-            await finalize(env, envelope, req);
+            try { await finalize(env, envelope, req); }
+            catch (e) {
+              // Signature is recorded; ensureFinalized() re-runs sealing on any later read.
+              console.error('finalize failed, will retry on read', envelope.id, e && e.stack || e);
+            }
             return J({ ok: true, completed: true });
           }
           return J({ ok: true, completed: false, next: remaining.results[0].name });
@@ -341,7 +423,8 @@ export default {
 
       return bad('not found', 404);
     } catch (e) {
-      return J({ error: 'server error', detail: String(e && e.message || e) }, 500);
+      console.error('unhandled', p, e && e.stack || e);
+      return J({ error: 'server error' }, 500);
     }
   },
 };
@@ -441,8 +524,9 @@ async function finalize(env, envelope, req) {
 
 // ---------- public integrity page ----------
 async function verifyPage(env, id) {
-  const envelope = await getEnvelope(env, id);
+  let envelope = await getEnvelope(env, id);
   if (!envelope) return new Response('Not found', { status: 404 });
+  envelope = await ensureFinalized(env, envelope, null);
   const signers = await getSigners(env, id);
   const rows = signers.map(s =>
     `<tr><td>${esc(s.name)}</td><td>${s.status === 'signed' ? '✓ signed' : s.status}</td><td>${esc(s.signed_at || '—')}</td></tr>`).join('');
