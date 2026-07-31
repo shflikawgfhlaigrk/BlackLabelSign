@@ -1,77 +1,265 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BL Sign — Free e-signatures</title>
-<meta name="description" content="Send documents for signature free. Upload a PDF, place fields, share a link. Full audit certificate and tamper-evident hashes.">
-<link rel="stylesheet" href="/assets/app.css"></head>
-<body><div class="wrap narrow">
-<div style="margin-top:9vh">
-  <h1 style="font-size:34px"><span class="gold">BL</span> Sign</h1>
-  <p style="font-size:19px;margin-top:10px">Send documents for signature. <span class="gold">Free.</span></p>
-  <p class="muted" style="margin-top:8px">Upload a PDF, place signature fields, share a link. Every completed
-  document gets a burned-in certificate — signer identity, timestamps, IP, and a tamper-evident SHA-256
-  you can verify publicly. No subscription. No per-envelope fees.</p>
-</div>
+<title>BL Sign — Free e-signatures, sealed and provable</title>
+<meta name="description" content="Send documents for signature free. Burned-in audit certificate, tamper-evident SHA-256, no subscription.">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #050506; --txt: #edeae3; --mut: #9b958a; --acc: #f2f1ed; --acc2: #c9c8c3;
+  --line: rgba(255,255,255,.08); --card: rgba(255,255,255,.028);
+  --serif: "New York", ui-serif, Georgia, "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+}
+html { scroll-behavior: smooth; }
+body { background: var(--bg); color: var(--txt); font: 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+body::before { content: ""; position: fixed; inset: -20% -10% auto; height: 90vh; pointer-events: none; z-index: 0;
+  background: radial-gradient(58% 55% at 72% 8%, rgba(255,255,255,.075), transparent 62%),
+              radial-gradient(40% 40% at 10% 30%, rgba(255,255,255,.03), transparent 70%); }
+.wrap { position: relative; z-index: 1; max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+a { color: var(--acc2); text-decoration: none; }
+a:hover { text-decoration: underline; }
 
-<div class="card" id="startcard">
-  <h3 style="margin-top:0">Start free</h3>
-  <div class="row" style="flex-direction:column;align-items:stretch;gap:10px">
-    <input id="name" placeholder="Your name" autocomplete="name">
-    <input id="email" type="email" placeholder="you@company.com" autocomplete="email">
-    <button id="start">Send my first document</button>
+/* nav */
+nav { display: flex; align-items: center; gap: 26px; padding: 26px 0 0; }
+.logo { font-weight: 800; font-size: 19px; letter-spacing: .4px; color: var(--txt); }
+.logo b { color: var(--acc); }
+nav .links { margin-left: auto; display: flex; gap: 22px; font-size: 14px; }
+nav .links a { color: var(--mut); }
+nav .links a:hover { color: var(--txt); text-decoration: none; }
+
+/* hero */
+.hero { display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; padding: 84px 0 70px; }
+.eyebrow { font-size: 12px; letter-spacing: .22em; color: var(--acc); font-weight: 700; margin-bottom: 22px; }
+h1 { font-family: var(--serif); font-weight: 640; font-size: clamp(44px, 5.6vw, 68px); line-height: 1.04; letter-spacing: -.015em; }
+h1 .g { background: linear-gradient(100deg, #ffffff 5%, #d9d8d3 55%, #8f8e89 95%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sub { color: var(--mut); font-size: 17.5px; max-width: 46ch; margin: 24px 0 34px; }
+.sub b { color: var(--txt); font-weight: 600; }
+
+/* start form */
+.start { display: flex; flex-direction: column; gap: 10px; max-width: 420px; }
+.start input { background: rgba(255,255,255,.045); border: 1px solid var(--line); color: var(--txt);
+  border-radius: 12px; padding: 14px 16px; font: inherit; font-size: 15px; transition: border-color .18s, background .18s; }
+.start input::placeholder { color: #6f6a61; }
+.start input:focus { outline: none; border-color: rgba(255,255,255,.55); background: rgba(255,255,255,.06); }
+.cta { position: relative; border: none; cursor: pointer; border-radius: 12px; padding: 15px 22px;
+  font: 650 15.5px var(--sans); color: #0c0c0d; letter-spacing: .01em;
+  background: linear-gradient(180deg, #ffffff, #e8e7e2 58%, #c9c8c2);
+  box-shadow: 0 1px 0 rgba(255,255,255,.35) inset, 0 -10px 22px rgba(0,0,0,.18) inset, 0 10px 30px rgba(255,255,255,.12);
+  transition: transform .16s, box-shadow .16s, filter .16s; }
+.cta:hover { transform: translateY(-1px); filter: brightness(1.05); box-shadow: 0 1px 0 rgba(255,255,255,.35) inset, 0 -10px 22px rgba(0,0,0,.18) inset, 0 16px 40px rgba(255,255,255,.18); }
+.cta:disabled { opacity: .5; transform: none; cursor: default; }
+.tiny { font-size: 12.5px; color: #756f65; }
+.err { color: #e8a2a5; font-size: 13.5px; min-height: 18px; }
+
+/* document mock */
+.mockwrap { position: relative; perspective: 1300px; min-height: 480px; }
+.page { position: absolute; background: #fbfaf7; border-radius: 10px; box-shadow: 0 40px 90px rgba(0,0,0,.55), 0 6px 22px rgba(0,0,0,.35); }
+.page.cert { width: 78%; aspect-ratio: 17/22; right: -4%; top: 9%; transform: rotate(6deg);
+  padding: 7% 7% 0; filter: brightness(.82); }
+.page.doc { width: 82%; aspect-ratio: 17/22; left: 0; top: 0; transform: rotate(-2.6deg);
+  padding: 8% 8% 0; transition: transform .5s cubic-bezier(.2,.8,.2,1); }
+.mockwrap:hover .page.doc { transform: rotate(-.6deg) translateY(-6px); }
+.page .t { height: 11px; border-radius: 3px; background: #1c1c22; opacity: .88; width: 62%; margin-bottom: 14px; }
+.page .l { height: 6px; border-radius: 3px; background: #cfcdc6; margin-bottom: 9px; }
+.page .l.w90 { width: 90%; } .page .l.w75 { width: 75%; } .page .l.w83 { width: 83%; } .page .l.w60 { width: 60%; }
+.sigline { margin-top: 13%; border-bottom: 1.6px solid #b9b6ad; position: relative; height: 64px; }
+.sigline svg { position: absolute; left: 4%; bottom: -8px; width: 72%; overflow: visible; }
+.sigline svg path { stroke: #16161a; stroke-width: 3.4; fill: none; stroke-linecap: round;
+  stroke-dasharray: 640; stroke-dashoffset: 640; animation: draw 2.1s .7s cubic-bezier(.45,0,.3,1) forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+.sigcap { font: 600 9px var(--sans); color: #8a867c; letter-spacing: .14em; margin-top: 7px; }
+.seal { position: absolute; right: -7%; bottom: 8%; width: 116px; height: 116px; border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, #ffffff, #c9c8c3 55%, #7c7b76);
+  box-shadow: 0 14px 34px rgba(0,0,0,.5), 0 0 0 5px rgba(255,255,255,.12);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  color: #141416; text-align: center; transform: rotate(8deg); animation: pop .5s 2.6s cubic-bezier(.3,1.6,.4,1) backwards; }
+.seal b { font-size: 15px; letter-spacing: .04em; }
+.seal span { font: 700 8.5px var(--sans); letter-spacing: .16em; }
+@keyframes pop { from { transform: rotate(8deg) scale(0); } }
+.cert .cl { height: 5px; background: #d6d3ca; border-radius: 3px; margin-bottom: 8px; }
+.cert .ct { font: 800 10px var(--sans); letter-spacing: .18em; color: #33322d; margin-bottom: 12px; }
+.hash { position: absolute; left: 6%; bottom: -7%; background: rgba(16,16,18,.92); border: 1px solid var(--line);
+  backdrop-filter: blur(8px); border-radius: 10px; padding: 11px 16px; font: 12px ui-monospace, Menlo, monospace;
+  color: #e8e7e2; box-shadow: 0 18px 44px rgba(0,0,0,.5); animation: rise .7s 3s backwards; }
+.hash i { color: #ffffff; font-style: normal; margin-right: 8px; }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+
+/* sections */
+.divider { height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,.3), transparent); }
+section { padding: 72px 0; }
+h2 { font-family: var(--serif); font-size: 32px; font-weight: 620; letter-spacing: -.01em; margin-bottom: 10px; }
+.lead { color: var(--mut); max-width: 60ch; margin-bottom: 40px; }
+.grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.feat { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 24px 22px;
+  transition: transform .2s, border-color .2s, background .2s; }
+.feat:hover { transform: translateY(-3px); border-color: rgba(255,255,255,.35); background: rgba(255,255,255,.045); }
+.feat .ic { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(140deg, rgba(255,255,255,.16), rgba(255,255,255,.04)); border: 1px solid rgba(255,255,255,.25);
+  color: var(--acc2); font-size: 17px; margin-bottom: 15px; }
+.feat b { display: block; font-size: 15.5px; margin-bottom: 7px; }
+.feat p { color: var(--mut); font-size: 13.8px; line-height: 1.55; }
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; counter-reset: st; }
+.step { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 26px 24px 24px; }
+.step::before { counter-increment: st; content: counter(st, decimal-leading-zero); position: absolute; top: 18px; right: 20px;
+  font: 700 13px var(--sans); letter-spacing: .1em; color: rgba(255,255,255,.4); }
+.step b { display: block; font-size: 16px; margin-bottom: 8px; }
+.step p { color: var(--mut); font-size: 14px; }
+.strip { display: flex; flex-wrap: wrap; gap: 10px 26px; justify-content: center; padding: 26px 0;
+  color: #877f72; font-size: 13px; letter-spacing: .04em; }
+.strip span::before { content: "✓"; color: var(--acc); margin-right: 8px; }
+
+/* upload panel + final cta */
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 34px; max-width: 560px; }
+.panel h3 { font-size: 18px; margin-bottom: 4px; }
+.panel .who { color: var(--mut); font-size: 13.5px; margin-bottom: 20px; }
+.panel input[type=text], .panel input[type=file] { width: 100%; background: rgba(255,255,255,.045); border: 1px solid var(--line);
+  color: var(--txt); border-radius: 12px; padding: 13px 15px; font: inherit; font-size: 15px; margin-bottom: 12px; }
+.panel input:focus { outline: none; border-color: rgba(255,255,255,.55); }
+.cta2 { text-align: center; padding: 84px 0 96px; }
+.cta2 h2 { font-size: clamp(30px, 4vw, 44px); }
+.cta2 .lead { margin: 14px auto 30px; }
+footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: #756f65; font-size: 13px; line-height: 2; }
+
+/* motion + responsive */
+.fx { opacity: 0; transform: translateY(18px); animation: fadeUp .8s cubic-bezier(.2,.7,.2,1) forwards; }
+.d1 { animation-delay: .08s; } .d2 { animation-delay: .18s; } .d3 { animation-delay: .28s; } .d4 { animation-delay: .4s; }
+@keyframes fadeUp { to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .fx, .sigline svg path, .seal, .hash { animation: none !important; opacity: 1 !important; transform: none !important; stroke-dashoffset: 0 !important; } }
+@media (max-width: 900px) {
+  .hero { grid-template-columns: 1fr; gap: 64px; padding-top: 54px; }
+  .mockwrap { min-height: 0; max-width: 480px; margin: 0 auto; width: 100%;
+    height: calc(min(82vw, 420px) * 1.4 + 70px); }
+  .grid4 { grid-template-columns: 1fr 1fr; }
+  .steps { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) { .grid4 { grid-template-columns: 1fr; } nav .links a.hide { display: none; } }
+</style></head>
+<body>
+<div class="wrap">
+<nav class="fx">
+  <span class="logo"><b>BL</b> Sign</span>
+  <span class="links">
+    <a href="#how" class="hide">How it works</a>
+    <a href="/me">My envelopes</a>
+    <a href="https://blacklabeltec.com">Black Label</a>
+  </span>
+</nav>
+
+<div class="hero">
+  <div>
+    <div class="eyebrow fx d1">FREE E-SIGNATURES · NO SUBSCRIPTION</div>
+    <h1 class="fx d1">Signed. Sealed.<br><span class="g">Provable.</span></h1>
+    <p class="sub fx d2">Upload a PDF, place your fields, share a link. Every completed document
+    carries a <b>burned-in certificate of completion</b> and a <b>tamper-evident SHA-256</b>
+    anyone can verify — forever. Your counterparty needs no account. Neither does your wallet.</p>
+    <div class="start fx d3" id="startcard">
+      <input id="name" placeholder="Your name" autocomplete="name">
+      <input id="email" type="email" placeholder="you@company.com" autocomplete="email">
+      <button class="cta" id="start">Send my first document — free</button>
+      <div class="err" id="err"></div>
+      <span class="tiny">3 envelopes a day, free forever. ESIGN &amp; UETA compliant.</span>
+    </div>
+    <div class="panel fx d3" id="upcard" style="display:none">
+      <h3>New envelope</h3>
+      <div class="who" id="hello"></div>
+      <input type="text" id="title" placeholder='Document title — e.g. "Consulting Agreement"'>
+      <input type="file" id="file" accept="application/pdf">
+      <button class="cta" id="create" style="width:100%">Upload &amp; place fields</button>
+      <div class="err" id="err2"></div>
+      <span class="tiny">Free tier: 3 envelopes/day · 15MB · up to 8 signers · <a href="/me">my envelopes →</a></span>
+    </div>
   </div>
-  <p id="err" class="muted small" style="margin-top:8px"></p>
-</div>
 
-<div class="card" id="upcard" style="display:none">
-  <h3 style="margin-top:0">New envelope <span class="muted small" id="hello"></span></h3>
-  <div class="row" style="flex-direction:column;align-items:stretch;gap:10px">
-    <input id="title" placeholder='Document title (e.g. "Consulting Agreement")'>
-    <input id="file" type="file" accept="application/pdf">
-    <button id="create">Upload &amp; place fields</button>
+  <div class="mockwrap fx d3" aria-hidden="true">
+    <div class="page cert">
+      <div class="ct">CERTIFICATE OF COMPLETION</div>
+      <div class="cl" style="width:88%"></div><div class="cl" style="width:70%"></div>
+      <div class="cl" style="width:80%"></div><div class="cl" style="width:56%"></div>
+      <div class="cl" style="width:74%"></div><div class="cl" style="width:62%"></div>
+    </div>
+    <div class="page doc">
+      <div class="t"></div>
+      <div class="l w90"></div><div class="l w83"></div><div class="l w90"></div>
+      <div class="l w75"></div><div class="l w83"></div><div class="l w60"></div>
+      <div class="sigline">
+        <svg viewBox="0 0 300 90">
+          <path d="M8 62 C 30 18, 52 14, 58 40 C 63 61, 46 74, 38 64 C 30 52, 60 30, 88 34 C 112 38, 108 62, 128 56 C 146 51, 148 34, 168 38 C 190 43, 196 60, 224 48 C 248 38, 268 44, 292 40"/>
+        </svg>
+      </div>
+      <div class="sigcap">AUTHORIZED SIGNATURE</div>
+    </div>
+    <div class="seal"><span>BL SIGN</span><b>✓</b><span>SEALED</span></div>
+    <div class="hash"><i>✓ VERIFIED</i>sha-256 · 0f00a276df74…e3bc</div>
   </div>
-  <p class="muted small" style="margin-top:10px">Free tier: 3 envelopes/day · 15MB · up to 8 signers.
-  <a href="/me">My envelopes →</a></p>
+</div>
 </div>
 
-<div class="card">
-  <h3 style="margin-top:0">How it works</h3>
-  <p class="small" style="line-height:2">
-  <b>1.</b> Upload your PDF and click where signatures, dates, and initials go.<br>
-  <b>2.</b> Add signers — each gets a private signing link you share however you like (text, email, Slack).<br>
-  <b>3.</b> Signers consent (ESIGN/UETA), sign by drawing or typing, and everyone gets the sealed PDF
-  with a certificate of completion and a public verification page.</p>
+<div class="divider"></div>
+<div class="wrap">
+<section id="features">
+  <h2>Everything DocuSign charges for.<br>Nothing it charges.</h2>
+  <p class="lead">Built for real agreements — client contracts, separations, NDAs, releases — with the
+  evidence trail to stand behind them.</p>
+  <div class="grid4">
+    <div class="feat"><div class="ic">⛨</div><b>Certificate of completion</b><p>Consent, timestamps, IP and device for every signer — burned into the final PDF, not stored in someone's cloud.</p></div>
+    <div class="feat"><div class="ic">#</div><b>Tamper-evident hashes</b><p>Original and signed SHA-256 recorded on a public verification page. Anyone can prove a copy is untouched.</p></div>
+    <div class="feat"><div class="ic">⇉</div><b>Sequential routing</b><p>Up to 8 signers, in order. Each gets a private link that activates only when it's their turn.</p></div>
+    <div class="feat"><div class="ic">$</div><b>Actually free</b><p>No trial clock, no per-envelope fees, no watermark ransom. Three envelopes a day, forever.</p></div>
+  </div>
+</section>
+
+<section id="how">
+  <h2>Sixty seconds to sent</h2>
+  <div class="steps">
+    <div class="step"><b>Upload &amp; place</b><p>Drop in your PDF and click where signatures, initials, dates, and checkboxes go.</p></div>
+    <div class="step"><b>Share the links</b><p>Each signer gets a private signing link — send it by text, email, Slack, however you talk.</p></div>
+    <div class="step"><b>Sealed &amp; delivered</b><p>Signers consent and sign by drawing or typing. Everyone gets the sealed PDF and its verification page.</p></div>
+  </div>
+</section>
+
+<div class="strip">
+  <span>ESIGN &amp; UETA compliant</span><span>Consent captured per signer</span>
+  <span>IP + device audit trail</span><span>Public hash verification</span><span>Works on any phone</span>
 </div>
 
-<p class="muted small" style="margin:26px 0 40px">
-  Built by <a href="https://blacklabeltec.com">Black Label Technologies</a> — custom software, automation,
-  and AI systems for businesses. Want a tool like this built for you?
-  <a href="https://blacklabeltec.com">Talk to us</a>.
-  &nbsp;·&nbsp; <a href="mailto:michael@blacklabelbots.com?subject=BL%20Sign%20abuse%20report">Report abuse</a>
-</p>
+<div class="cta2">
+  <h2>Stop renting your <span class="g" style="font-family:inherit">signatures.</span></h2>
+  <p class="lead">Send your first document in the next minute.</p>
+  <button class="cta" onclick="document.getElementById('name')?.focus();window.scrollTo({top:0,behavior:'smooth'})">Start free</button>
 </div>
+</div>
+
+<footer><div class="wrap">
+  Built by <a href="https://blacklabeltec.com">Black Label Technologies</a> — custom software, automation, and AI systems for businesses that would rather own their tools than rent them.
+  <a href="https://blacklabeltec.com">Talk to us</a> about building yours.<br>
+  <a href="mailto:michael@blacklabelbots.com?subject=BL%20Sign%20abuse%20report">Report abuse</a> · <a href="/verify/" onclick="return false" style="color:#4d493f">Verify a document: sign.blacklabeltec.com/verify/&lt;envelope-id&gt;</a> · <a href="/admin" style="color:#4d493f">Admin</a>
+</div></footer>
+
 <script>
 const $ = s => document.querySelector(s);
 async function checkSession() {
-  const r = await fetch('/api/public/envelopes');
-  if (r.ok) {
-    const d = await r.json();
-    $('#startcard').style.display = 'none';
-    $('#upcard').style.display = '';
-    $('#hello').textContent = '— ' + d.sender.name;
-  }
+  try {
+    const r = await fetch('/api/public/envelopes');
+    if (r.ok) { const d = await r.json(); swap(d.sender.name); }
+  } catch {}
+}
+function swap(name) {
+  $('#startcard').style.display = 'none';
+  $('#upcard').style.display = '';
+  $('#hello').textContent = 'Sending as ' + name;
 }
 $('#start').onclick = async () => {
+  $('#start').disabled = true;
   const r = await fetch('/api/public/start', { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name: $('#name').value, email: $('#email').value }) });
   const d = await r.json();
+  $('#start').disabled = false;
   if (!r.ok) { $('#err').textContent = d.error || 'Try again'; return; }
-  $('#startcard').style.display = 'none';
-  $('#upcard').style.display = '';
-  $('#hello').textContent = '— ' + d.name;
+  swap(d.name);
 };
 $('#create').onclick = async () => {
   const f = $('#file').files[0];
-  if (!$('#title').value.trim() || !f) { $('#err').textContent = 'Title and a PDF are required'; return; }
+  if (!$('#title').value.trim() || !f) { $('#err2').textContent = 'Title and a PDF are required.'; return; }
   const fd = new FormData();
   fd.append('title', $('#title').value.trim());
   fd.append('file', f);
@@ -79,8 +267,9 @@ $('#create').onclick = async () => {
   const r = await fetch('/api/public/envelopes', { method: 'POST', body: fd });
   const d = await r.json();
   $('#create').disabled = false;
-  if (!r.ok) { alert(d.error || 'Upload failed'); return; }
+  if (!r.ok) { $('#err2').textContent = d.error || 'Upload failed.'; return; }
   location.href = '/e/' + d.id;
 };
 checkSession();
-</script></body></html>
+</script>
+</body></html>
