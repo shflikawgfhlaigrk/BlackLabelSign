@@ -1,7 +1,17 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BL Sign — Free e-signatures, sealed and provable</title>
-<meta name="description" content="Send documents for signature free. Burned-in audit certificate, tamper-evident SHA-256, no subscription.">
+<meta name="description" content="Send PDFs for signature free. Burned-in audit certificate, verifiable SHA-256 content hashes, no subscription.">
+<link rel="canonical" href="https://sign.blacklabeltec.com/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="BL Sign">
+<meta property="og:title" content="BL Sign — Free e-signatures, sealed and provable">
+<meta property="og:description" content="Send PDFs for signature free. Burned-in audit certificate, verifiable SHA-256 content hashes, no subscription.">
+<meta property="og:url" content="https://sign.blacklabeltec.com/">
+<meta name="twitter:card" content="summary">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"SoftwareApplication","@id":"https://sign.blacklabeltec.com/#software","name":"BL Sign","url":"https://sign.blacklabeltec.com/","applicationCategory":"BusinessApplication","operatingSystem":"Web","description":"Free electronic-signature software with signer consent, audit certificates, and public SHA-256 hash verification.","publisher":{"@id":"https://blacklabeltec.com/#organization"}},{"@type":"Organization","@id":"https://blacklabeltec.com/#organization","name":"BlackLabel Tech","url":"https://blacklabeltec.com/"}]}
+</script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -150,14 +160,14 @@ footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: #756f65
     <div class="eyebrow fx d1">FREE E-SIGNATURES · NO SUBSCRIPTION</div>
     <h1 class="fx d1">Signed. Sealed.<br><span class="g">Provable.</span></h1>
     <p class="sub fx d2">Upload a PDF, place your fields, share a link. Every completed document
-    carries a <b>burned-in certificate of completion</b> and a <b>tamper-evident SHA-256</b>
-    anyone can verify — forever. Your counterparty needs no account. Neither does your wallet.</p>
+    carries a <b>burned-in certificate of completion</b> and <b>SHA-256 content hashes</b>
+    anyone can compare against the live envelope record. Your counterparty needs no account. Neither does your wallet.</p>
     <div class="start fx d3" id="startcard">
       <input id="name" placeholder="Your name" autocomplete="name">
       <input id="email" type="email" placeholder="you@company.com" autocomplete="email">
       <button class="cta" id="start">Send my first document — free</button>
       <div class="err" id="err"></div>
-      <span class="tiny">3 envelopes a day, free forever. ESIGN &amp; UETA compliant.</span>
+      <span class="tiny">3 envelopes a day, free. Built around ESIGN &amp; UETA consent and evidence requirements.</span>
     </div>
     <div class="panel fx d3" id="upcard" style="display:none">
       <h3>New envelope</h3>
@@ -197,12 +207,12 @@ footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: #756f65
 <div class="divider"></div>
 <div class="wrap">
 <section id="features">
-  <h2>Everything DocuSign charges for.<br>Nothing it charges.</h2>
+  <h2>The core signing loop.<br>Without another subscription.</h2>
   <p class="lead">Built for real agreements — client contracts, separations, NDAs, releases — with the
   evidence trail to stand behind them.</p>
   <div class="grid4">
-    <div class="feat"><div class="ic">⛨</div><b>Certificate of completion</b><p>Consent, timestamps, IP and device for every signer — burned into the final PDF, not stored in someone's cloud.</p></div>
-    <div class="feat"><div class="ic">#</div><b>Tamper-evident hashes</b><p>Original and signed SHA-256 recorded on a public verification page. Anyone can prove a copy is untouched.</p></div>
+    <div class="feat"><div class="ic">⛨</div><b>Certificate of completion</b><p>Consent, timestamps, IP and device for every signer — attached directly to the final PDF and retained with the envelope record.</p></div>
+    <div class="feat"><div class="ic">#</div><b>Verifiable content hashes</b><p>Original and signed SHA-256 recorded on a verification page, so a downloaded copy can be checked against the envelope record.</p></div>
     <div class="feat"><div class="ic">⇉</div><b>Sequential routing</b><p>Up to 8 signers, in order. Each gets a private link that activates only when it's their turn.</p></div>
     <div class="feat"><div class="ic">$</div><b>Actually free</b><p>No trial clock, no per-envelope fees, no watermark ransom. Three envelopes a day, forever.</p></div>
   </div>
@@ -213,12 +223,12 @@ footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: #756f65
   <div class="steps">
     <div class="step"><b>Upload &amp; place</b><p>Drop in your PDF and click where signatures, initials, dates, and checkboxes go.</p></div>
     <div class="step"><b>Share the links</b><p>Each signer gets a private signing link — send it by text, email, Slack, however you talk.</p></div>
-    <div class="step"><b>Sealed &amp; delivered</b><p>Signers consent and sign by drawing or typing. Everyone gets the sealed PDF and its verification page.</p></div>
+    <div class="step"><b>Completed &amp; verifiable</b><p>Signers consent and sign by drawing or typing. Each recipient link unlocks the completed PDF, with its verification page.</p></div>
   </div>
 </section>
 
 <div class="strip">
-  <span>ESIGN &amp; UETA compliant</span><span>Consent captured per signer</span>
+  <span>ESIGN &amp; UETA consent workflow</span><span>Consent captured per signer</span>
   <span>IP + device audit trail</span><span>Public hash verification</span><span>Works on any phone</span>
 </div>
 
@@ -230,8 +240,8 @@ footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: #756f65
 </div>
 
 <footer><div class="wrap">
-  Built by <a href="https://blacklabeltec.com">Black Label Technologies</a> — custom software, automation, and AI systems for businesses that would rather own their tools than rent them.
-  <a href="https://blacklabeltec.com">Talk to us</a> about building yours.<br>
+  BL Sign is a <a href="https://blacklabeltec.com/network#bl-sign">BlackLabel Tech product</a> — custom software, automation, and AI systems for businesses that would rather own their tools than rent them.
+  <a href="https://blacklabeltec.com/custom-software-development">Talk to us</a> about building yours.<br>
   <a href="mailto:michael@blacklabelbots.com?subject=BL%20Sign%20abuse%20report">Report abuse</a> · <a href="/verify/" onclick="return false" style="color:#4d493f">Verify a document: sign.blacklabeltec.com/verify/&lt;envelope-id&gt;</a> · <a href="/admin" style="color:#4d493f">Admin</a>
 </div></footer>
 

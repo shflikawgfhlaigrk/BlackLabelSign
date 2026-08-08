@@ -1,6 +1,6 @@
 name = "bl-sign"
 main = "src/index.js"
-compatibility_date = "2025-05-05"
+compatibility_date = "2026-07-30"
 account_id = "a0703c8cbbf2d56af47d05d5817b8c5b"
 workers_dev = false
 routes = [
@@ -23,3 +23,10 @@ bucket_name = "bl-sign-docs"
 
 [observability]
 enabled = true
+
+[[send_email]]
+name = "EMAIL"
+allowed_sender_addresses = ["sign@blacklabelbots.com"]
+
+[triggers]
+crons = ["17 * * * *"]

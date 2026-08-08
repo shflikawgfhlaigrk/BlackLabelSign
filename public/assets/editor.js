@@ -12,14 +12,19 @@ let fields = [];           // {signer_index, type, page, x, y, w, h}
 let editable = false;
 let placing = null;
 let pageEls = [];          // {overlay, W, H}
+let envelopeMeta = null;
+let senderMeta = null;
 
 async function init() {
   const r = await fetch(`/api/envelopes/${envId}`);
   if (r.status === 401) { location.href = location.pathname.startsWith('/admin') ? '/admin' : '/'; return; }
   const d = await r.json();
   const e = d.envelope;
+  envelopeMeta = e;
+  senderMeta = d.sender || { name: 'Black Label Technologies', email: 'michael@blacklabelbots.com' };
   editable = e.status === 'draft';
   $('#etitle').textContent = e.title;
+  document.title = `${e.title} — BL Sign`;
   $('#echip').innerHTML = `<span class="chip ${e.status}">${e.status}</span>`;
   signers = d.signers.map(s => ({ name: s.name, email: s.email, role: s.role || 'signer' }));
   if (e.routing) $('#routing').value = e.routing;
@@ -34,7 +39,10 @@ async function init() {
     $('#savetpl2').onclick = () => $('#savetpl').onclick();
   }
 
-  if (d.signers.some(s => s.link)) showLinks(d.signers.map(s => ({ name: s.name, email: s.email, link: s.link, status: s.status })), e);
+  if (d.signers.some(s => s.link)) showLinks(d.signers.map(s => ({
+    id: s.id, name: s.name, email: s.email, role: s.role || 'signer', link: s.link, status: s.status,
+    delivery_status: s.delivery_status, delivery_error: s.delivery_error,
+  })), e, senderMeta);
   renderSigners();
   await renderPdf();
   renderFields();
@@ -147,8 +155,8 @@ function renderFields() {
       const move = e2 => {
         const dx = (e2.clientX - start.x) / pe.W, dy = (e2.clientY - start.y) / pe.H;
         if (resizing) {
-          f.w = Math.max(0.02, start.fw + dx);
-          f.h = Math.max(0.012, start.fh + dy);
+          f.w = Math.min(1 - f.x, Math.max(0.02, start.fw + dx));
+          f.h = Math.min(1 - f.y, Math.max(0.012, start.fh + dy));
         } else {
           f.x = Math.min(Math.max(0, start.fx + dx), 1 - f.w);
           f.y = Math.min(Math.max(0, start.fy + dy), 1 - f.h);
@@ -212,27 +220,51 @@ $('#send').onclick = async () => {
   });
   const d = await r.json();
   if (!r.ok) { toast(d.error || 'Send failed'); return; }
-  toast('Envelope sent — links ready');
-  showLinks(d.signers.map(s => ({ ...s, status: 'pending' })));
+  const accepted = d.delivery?.accepted || 0, failed = d.delivery?.failed || 0;
+  toast(failed ? `${accepted} email accepted, ${failed} failed — links remain available` :
+    (accepted ? `${accepted} signing email${accepted === 1 ? '' : 's'} accepted` : 'Envelope ready — later recipients are queued by routing'));
+  showLinks(d.signers.map(s => ({ ...s, status: 'pending' })), envelopeMeta, senderMeta);
   $('#echip').innerHTML = '<span class="chip sent">sent</span>';
   editable = false;
   $('#save').style.display = 'none'; $('#send').style.display = 'none'; $('#palette').style.display = 'none';
   renderSigners(); renderFields();
 };
 
-function showLinks(rows, envelope) {
+function showLinks(rows, envelope, sender) {
+  const envelopeTitle = envelope?.title || $('#etitle').textContent || 'Document';
+  const senderName = sender?.name || 'Black Label Technologies';
+  const senderEmail = sender?.email || '';
   $('#links').style.display = '';
-  $('#linkrows').innerHTML = rows.map(s => `
-    <div style="margin-bottom:12px">
-      <div class="row"><b>${esc(s.name)}</b> <span class="muted small">${esc(s.email)}</span> ${s.status === 'signed' ? '<span class="chip completed">signed</span>' : ''}</div>
+  $('#linkrows').innerHTML = rows.map(s => {
+    const isCC = s.role === 'cc';
+    const subject = isCC ? `Copy of ${envelopeTitle}` : `Signature requested: ${envelopeTitle}`;
+    const action = isCC
+      ? `A copy of “${envelopeTitle}” is available at this recipient-specific link. The completed PDF will unlock there after signing finishes:`
+      : `Please review and sign “${envelopeTitle}” at your recipient-specific link:`;
+    const signoff = `— ${senderName}${senderEmail ? `\n${senderEmail}` : ''}`;
+    const body = `Hi ${s.name.split(' ')[0]},\n\n${action}\n${s.link}\n\n${signoff}`;
+    const deliveryChip = s.delivery_status === 'accepted' ? '<span class="chip completed">email accepted</span>' :
+      (s.delivery_status === 'failed' ? `<span class="chip declined" title="${esc(s.delivery_error || '')}">email failed</span>` : '<span class="chip draft">not emailed yet</span>');
+    return `<div style="margin-bottom:12px">
+      <div class="row"><b>${esc(s.name)}</b> <span class="muted small">${esc(s.email)}</span> ${isCC ? '<span class="chip">cc</span>' : ''} ${s.status === 'signed' ? '<span class="chip completed">signed</span>' : ''} ${deliveryChip}</div>
       ${s.link ? `<div class="linkbox"><input readonly value="${esc(s.link)}" class="grow mono" onclick="this.select()">
         <button class="ghost" data-copy="${esc(s.link)}">Copy</button>
-        <a class="btn ghost" href="mailto:${encodeURIComponent(s.email)}?subject=${encodeURIComponent('Signature requested: ' + document.title.replace('BL Sign — ', ''))}&body=${encodeURIComponent(`Hi ${s.name.split(' ')[0]},\n\nPlease review and sign here:\n${s.link}\n\n— Michael\nBlack Label Technologies`)}">Email</a></div>` : ''}
-    </div>`).join('');
+        <a class="btn ghost" href="mailto:${encodeURIComponent(s.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}">Open mail app</a>
+        ${!isCC && s.status !== 'signed' && envelope?.status === 'sent' ? `<button class="ghost" data-resend="${esc(s.id)}">${s.delivery_status === 'accepted' ? 'Send reminder' : 'Send email'}</button>` : ''}</div>` : ''}
+    </div>`;
+  }).join('');
   if (envelope && envelope.status === 'completed')
     $('#linkrows').innerHTML += `<a class="btn" href="/api/envelopes/${envId}/final" target="_blank">Download signed PDF</a>
       <a class="btn ghost" href="/verify/${envId}" target="_blank">Verification page</a>`;
   document.querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); toast('Link copied'); });
+  document.querySelectorAll('[data-resend]').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    const response = await fetch(`/api/envelopes/${envId}/resend`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ signer_id: b.dataset.resend }) });
+    const result = await response.json();
+    toast(response.ok ? 'Email accepted by delivery service' : (result.error || result.delivery?.error || 'Delivery failed'));
+    if (response.ok) setTimeout(() => location.reload(), 650); else b.disabled = false;
+  });
 }
 
 init();

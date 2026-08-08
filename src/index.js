@@ -1,5 +1,6 @@
 // BL Sign — self-hosted e-signature (ESIGN/UETA: intent, consent, attribution, integrity, retention)
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { buildDeliveryEmail, buildVerificationEmail } from './mail.mjs';
 
 const J = (d, s = 200, h = {}) => new Response(JSON.stringify(d), { status: s, headers: { 'content-type': 'application/json', ...h } });
 const bad = (m, s = 400) => J({ error: m }, s);
@@ -12,10 +13,57 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const CONSENT_VERSION = 'esign-v1';
 const MAX_PDF = 15 * 1024 * 1024;
 const MAX_SIG_PNG = 600 * 1024;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const validEmail = value => EMAIL_RE.test(String(value || '').trim());
 
 async function sha256hex(buf) {
   const d = await crypto.subtle.digest('SHA-256', buf);
   return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+const AUTH_CODE_TTL_MS = 10 * 60_000;
+const AUTH_SESSION_TTL_MS = 12 * 60 * 60_000;
+const AUTH_CODE_RESEND_MS = 60_000;
+const textBytes = value => new TextEncoder().encode(String(value));
+const authCookieName = signer => `blsa_${signer.id.slice(0, 24)}`;
+const maskedEmail = value => {
+  const [local, domain] = String(value || '').split('@');
+  if (!domain) return '';
+  const shown = local.length <= 2 ? local[0] : local.slice(0, 2);
+  return `${shown}${'*'.repeat(Math.max(2, local.length - shown.length))}@${domain}`;
+};
+
+async function hmacKey(secret) {
+  return crypto.subtle.importKey('raw', textBytes(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+}
+
+async function hmacHex(secret, value) {
+  const signature = await crypto.subtle.sign('HMAC', await hmacKey(secret), textBytes(value));
+  return [...new Uint8Array(signature)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function signerAuthenticated(req, env, signer) {
+  if (!validEmail(signer.email)) return true;
+  if (!env.SESSION_SECRET) return false;
+  const name = authCookieName(signer);
+  const match = (req.headers.get('cookie') || '').match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
+  if (!match) return false;
+  const [expiryText, signature] = match[1].split('.');
+  const expiry = Number(expiryText);
+  if (!Number.isFinite(expiry) || expiry <= Date.now() || !/^[a-f0-9]{64}$/.test(signature || '')) return false;
+  const bytes = Uint8Array.from(signature.match(/.{2}/g), pair => parseInt(pair, 16));
+  return crypto.subtle.verify('HMAC', await hmacKey(env.SESSION_SECRET), bytes,
+    textBytes(`${signer.id}:${signer.token}:${expiryText}`));
+}
+
+async function signerSessionCookie(env, signer) {
+  const expiry = Date.now() + AUTH_SESSION_TTL_MS;
+  const signature = await hmacHex(env.SESSION_SECRET, `${signer.id}:${signer.token}:${expiry}`);
+  return `${authCookieName(signer)}=${expiry}.${signature}; Max-Age=${AUTH_SESSION_TTL_MS / 1000}; Path=/api/session/${signer.token}; HttpOnly; Secure; SameSite=Strict`;
+}
+
+async function authCodeHash(env, signer, code) {
+  return sha256hex(textBytes(`${env.SESSION_SECRET}:${signer.id}:${signer.token}:${code}`));
 }
 
 function isAdmin(req, env) {
@@ -60,7 +108,11 @@ function addSecurityHeaders(res, path) {
     "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self'; " +
     "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
-  if (NOINDEX.some(r => r.test(path))) h.set('x-robots-tag', 'noindex, nofollow');
+  if (NOINDEX.some(r => r.test(path))) {
+    h.set('x-robots-tag', 'noindex, nofollow');
+    h.set('cache-control', 'private, no-store, max-age=0');
+    h.set('pragma', 'no-cache');
+  }
   return new Response(res.body, { status: res.status, headers: h });
 }
 
@@ -101,11 +153,107 @@ async function validatePdf(bytes) {
   }
 }
 
+async function senderIdentityFor(env, envelope) {
+  const row = envelope.sender_id
+    ? await env.DB.prepare('SELECT name,email FROM senders WHERE id=?').bind(envelope.sender_id).first()
+    : null;
+  return row
+    ? { name: row.name, email: row.email, verified: false }
+    : { name: 'Black Label Technologies', email: 'michael@blacklabelbots.com', verified: true };
+}
+
+function emailFailure(error) {
+  const code = clean(error && error.code || 'E_DELIVERY_FAILED').slice(0, 80);
+  const message = clean(error && error.message || 'Email service rejected the message').slice(0, 220);
+  return `${code}: ${message}`;
+}
+
+async function deliverRecipientEmail(env, envelope, signer, kind, senderIdentity = null) {
+  const attemptedAt = now();
+  const sender = senderIdentity || await senderIdentityFor(env, envelope);
+  const link = `https://sign.blacklabeltec.com/s/${signer.token}`;
+  try {
+    const result = await env.EMAIL.send(buildDeliveryEmail({ envelope, signer, sender, kind, link }));
+    const messageId = clean(result && result.messageId || '').slice(0, 200);
+    const reminder = kind === 'reminder' ? 1 : 0;
+    await env.DB.prepare(`UPDATE signers SET
+        delivery_status='accepted', delivery_message_id=?, delivery_at=?, delivery_error=NULL,
+        last_delivery_kind=?, delivery_attempts=COALESCE(delivery_attempts,0)+1,
+        reminder_count=COALESCE(reminder_count,0)+?,
+        last_reminded_at=CASE WHEN ?=1 THEN ? ELSE last_reminded_at END
+      WHERE id=?`)
+      .bind(messageId, attemptedAt, kind, reminder, reminder, attemptedAt, signer.id).run();
+    await audit(env, envelope.id, signer.id, `email-${kind}-accepted`, null, messageId || 'accepted by Cloudflare Email Service');
+    return { signerId: signer.id, state: 'accepted', messageId };
+  } catch (error) {
+    const detail = emailFailure(error);
+    await env.DB.prepare(`UPDATE signers SET
+        delivery_status='failed', delivery_message_id=NULL, delivery_at=?, delivery_error=?,
+        delivery_attempts=COALESCE(delivery_attempts,0)+1
+      WHERE id=?`).bind(attemptedAt, detail, signer.id).run();
+    await audit(env, envelope.id, signer.id, `email-${kind}-failed`, null, detail);
+    return { signerId: signer.id, state: 'failed', error: detail };
+  }
+}
+
+async function runNotificationSweep(env) {
+  const current = now();
+  const expired = (await env.DB.prepare(
+    "SELECT id FROM envelopes WHERE status='sent' AND expires_at IS NOT NULL AND expires_at<=?")
+    .bind(current).all()).results;
+  for (const envelope of expired) {
+    const changed = await env.DB.prepare("UPDATE envelopes SET status='expired' WHERE id=? AND status='sent'")
+      .bind(envelope.id).run();
+    if (changed.meta.changes) await audit(env, envelope.id, null, 'expired', null);
+  }
+
+  const reminderBefore = new Date(Date.now() - 48 * 3600_000).toISOString();
+  const pending = (await env.DB.prepare(`
+    SELECT s.*, e.id AS env_id, e.title AS env_title, e.status AS env_status,
+      e.sender_id AS env_sender_id, e.routing AS env_routing, e.expires_at AS env_expires_at,
+      e.sent_at AS env_sent_at
+    FROM signers s JOIN envelopes e ON e.id=s.envelope_id
+    WHERE e.status='sent' AND s.role='signer' AND s.status='pending'
+      AND s.delivery_attempts<5 AND COALESCE(s.delivery_at,e.sent_at)<=?
+      AND (e.expires_at IS NULL OR e.expires_at>?)
+      AND (e.routing='parallel' OR NOT EXISTS (
+        SELECT 1 FROM signers prior WHERE prior.envelope_id=e.id AND prior.role='signer'
+          AND prior.order_index<s.order_index AND prior.status!='signed'))
+    ORDER BY e.sent_at, s.order_index LIMIT 50`)
+    .bind(reminderBefore, current).all()).results;
+  for (const row of pending) {
+    if (row.last_delivery_kind && row.reminder_count >= 3) continue;
+    const envelope = { id: row.env_id, title: row.env_title, status: row.env_status,
+      sender_id: row.env_sender_id, routing: row.env_routing, expires_at: row.env_expires_at,
+      sent_at: row.env_sent_at };
+    await deliverRecipientEmail(env, envelope, row, row.last_delivery_kind ? 'reminder' : 'request');
+  }
+
+  const completionRetryBefore = new Date(Date.now() - 3600_000).toISOString();
+  const completed = (await env.DB.prepare(`
+    SELECT s.*, e.id AS env_id, e.title AS env_title, e.status AS env_status,
+      e.sender_id AS env_sender_id, e.routing AS env_routing, e.expires_at AS env_expires_at
+    FROM signers s JOIN envelopes e ON e.id=s.envelope_id
+    WHERE e.status='completed' AND s.delivery_attempts<5
+      AND (s.last_delivery_kind IS NULL OR s.last_delivery_kind!='completion')
+      AND (s.delivery_at IS NULL OR s.delivery_at<=?)
+    ORDER BY e.completed_at LIMIT 50`).bind(completionRetryBefore).all()).results;
+  for (const row of completed) {
+    const envelope = { id: row.env_id, title: row.env_title, status: row.env_status,
+      sender_id: row.env_sender_id, routing: row.env_routing, expires_at: row.env_expires_at };
+    await deliverRecipientEmail(env, envelope, row, 'completion');
+  }
+}
+
 export default {
   async fetch(req, env) {
     const path = new URL(req.url).pathname;
     const res = await this.route(req, env);
     return addSecurityHeaders(res, path);
+  },
+
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(runNotificationSweep(env));
   },
 
   async route(req, env) {
@@ -124,8 +272,11 @@ export default {
       if (m === 'GET' && p.startsWith('/assets/')) return env.ASSETS.fetch(req);
       if (m === 'GET' && p === '/favicon.ico') return new Response(null, { status: 204 });
       if (m === 'GET' && p === '/robots.txt')
-        return new Response('User-agent: *\nDisallow: /s/\nDisallow: /e/\nDisallow: /admin\nDisallow: /verify/\nDisallow: /me\nDisallow: /api/\n',
+        return new Response('User-agent: *\nDisallow: /s/\nDisallow: /e/\nDisallow: /admin\nDisallow: /verify/\nDisallow: /me\nDisallow: /api/\nSitemap: https://sign.blacklabeltec.com/sitemap.xml\n',
           { headers: { 'content-type': 'text/plain' } });
+      if (m === 'GET' && p === '/sitemap.xml')
+        return new Response('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n<url><loc>https://sign.blacklabeltec.com/</loc></url>\n</urlset>\n',
+          { headers: { 'content-type': 'application/xml' } });
 
       if (m === 'GET' && /^\/verify\/[a-f0-9]+$/.test(p)) return verifyPage(env, p.split('/').pop());
 
@@ -154,7 +305,7 @@ export default {
         const b = await req.json().catch(() => ({}));
         const name = String(b.name || '').trim().slice(0, 120);
         const email = String(b.email || '').trim().toLowerCase().slice(0, 200);
-        if (!name || !/.+@.+\..+/.test(email)) return bad('name and a valid email are required');
+        if (!name || !validEmail(email)) return bad('name and a valid email are required');
         const ip = req.headers.get('cf-connecting-ip') || '';
         const today = now().slice(0, 10);
         const nIp = (await env.DB.prepare('SELECT COUNT(*) c FROM senders WHERE ip=? AND created_at>=?').bind(ip, today).first()).c;
@@ -338,7 +489,8 @@ export default {
           const fields = await getFields(env, envelope.id);
           const events = (await env.DB.prepare('SELECT * FROM events WHERE envelope_id=? ORDER BY ts').bind(envelope.id).all()).results;
           for (const s of signers) if (s.token) s.link = `${url.origin}/s/${s.token}`;
-          return J({ envelope, signers, fields, events });
+          const senderIdentity = await senderIdentityFor(env, envelope);
+          return J({ envelope, signers, fields, events, sender: senderIdentity });
         }
 
         if (m === 'PUT' && sub === '/setup') {
@@ -369,9 +521,14 @@ export default {
             if (si < 0 || si >= signerIds.length) return bad('field assigned to unknown signer');
             if (roles[si] === 'cc') return bad('CC recipients cannot have fields');
             if (!['signature', 'initials', 'date', 'text', 'checkbox'].includes(f.type)) return bad('bad field type');
-            const num = v => Math.max(0, Math.min(1, Number(v) || 0));
+            const page = Number(f.page);
+            const x = Number(f.x), y = Number(f.y), w = Number(f.w), h = Number(f.h);
+            if (!Number.isInteger(page) || page < 0 ||
+                ![x, y, w, h].every(Number.isFinite) || x < 0 || y < 0 || w <= 0 || h <= 0 ||
+                x + w > 1.001 || y + h > 1.001)
+              return bad('field geometry must stay inside its document page');
             stmts.push(env.DB.prepare('INSERT INTO fields (id,envelope_id,signer_id,type,page,x,y,w,h,required) VALUES (?,?,?,?,?,?,?,?,?,?)')
-              .bind(uid(), envelope.id, signerIds[si], f.type, Math.max(0, f.page | 0), num(f.x), num(f.y), num(f.w), num(f.h), f.type === 'checkbox' ? 0 : 1));
+              .bind(uid(), envelope.id, signerIds[si], f.type, page, x, y, w, h, f.type === 'checkbox' ? 0 : 1));
           }
           await env.DB.batch(stmts);
           return J({ ok: true });
@@ -385,7 +542,7 @@ export default {
           if (!signers.some(s => (s.role || 'signer') === 'signer')) return bad('add at least one signer (not just CC)');
           for (const s of signers) {
             if (!s.name) return bad('every recipient needs a name');
-            if (s.email && !/.+@.+\..+/.test(s.email)) return bad(`recipient "${s.name}" has an invalid email`);
+            if (!validEmail(s.email)) return bad(`recipient "${s.name}" needs a valid email`);
             if ((s.role || 'signer') === 'signer' &&
               !fields.some(f => f.signer_id === s.id && (f.type === 'signature' || f.type === 'initials')))
               return bad(`signer "${s.name}" has no signature field`);
@@ -400,7 +557,44 @@ export default {
           await env.DB.batch(stmts);
           await audit(env, envelope.id, null, 'sent', req, String((body && body.note) || '').slice(0, 300));
           const fresh = await getSigners(env, envelope.id);
-          return J({ ok: true, signers: fresh.map(s => ({ name: s.name, email: s.email, link: `${url.origin}/s/${s.token}` })) });
+          const signersOnly = fresh.filter(s => (s.role || 'signer') === 'signer');
+          const notify = routing === 'parallel' ? signersOnly : signersOnly.slice(0, 1);
+          const senderIdentity = await senderIdentityFor(env, envelope);
+          const deliveryResults = [];
+          for (const recipient of notify)
+            deliveryResults.push(await deliverRecipientEmail(env, { ...envelope, routing, expires_at: expiresAt }, recipient, 'request', senderIdentity));
+          const withDelivery = await getSigners(env, envelope.id);
+          return J({
+            ok: true,
+            delivery: {
+              accepted: deliveryResults.filter(x => x.state === 'accepted').length,
+              failed: deliveryResults.filter(x => x.state === 'failed').length,
+              deferred: withDelivery.filter(s => s.delivery_status === 'not_sent').length,
+            },
+            signers: withDelivery.map(s => ({
+              id: s.id, name: s.name, email: s.email, role: s.role || 'signer', status: s.status,
+              delivery_status: s.delivery_status, delivery_error: s.delivery_error,
+              link: `${url.origin}/s/${s.token}`,
+            })),
+          });
+        }
+
+        if (m === 'POST' && sub === '/resend') {
+          if (envelope.status !== 'sent') return bad('only active envelopes can send reminders');
+          const body = await req.json().catch(() => ({}));
+          const recipients = await getSigners(env, envelope.id);
+          const signer = recipients.find(s => s.id === String(body.signer_id || ''));
+          if (!signer || (signer.role || 'signer') !== 'signer' || signer.status !== 'pending')
+            return bad('pending signer not found', 404);
+          if (envelope.routing !== 'parallel' && !recipients.filter(s => (s.role || 'signer') === 'signer')
+            .every(s => s.order_index >= signer.order_index || s.status === 'signed'))
+            return bad('that signer is not active yet', 409);
+          if (signer.delivery_at && Date.now() - new Date(signer.delivery_at).getTime() < 60_000)
+            return bad('wait one minute before sending again', 429);
+          if ((signer.delivery_attempts || 0) >= 5) return bad('delivery attempt limit reached', 429);
+          const kind = signer.last_delivery_kind ? 'reminder' : 'request';
+          const result = await deliverRecipientEmail(env, envelope, signer, kind);
+          return J({ ok: result.state === 'accepted', delivery: result }, result.state === 'accepted' ? 200 : 502);
         }
 
         if (m === 'POST' && sub === '/adddoc') {
@@ -448,7 +642,7 @@ export default {
       }
 
       // ---------- signer API ----------
-      const sm = p.match(/^\/api\/session\/([A-Za-z0-9]+)(\/[a-z]+)?$/);
+      const sm = p.match(/^\/api\/session\/([A-Za-z0-9]+)(\/[a-z-]+)?$/);
       if (sm) {
         const signer = await env.DB.prepare('SELECT * FROM signers WHERE token=?').bind(sm[1]).first();
         if (!signer) return bad('invalid or expired link', 404);
@@ -459,6 +653,76 @@ export default {
         const all = await getSigners(env, envelope.id);
         const signersOnly = all.filter(s => (s.role || 'signer') === 'signer');
         const isViewer = (signer.role || 'signer') === 'cc';
+        const requiresEmailAuth = validEmail(signer.email);
+        const authenticated = await signerAuthenticated(req, env, signer);
+        const senderRow = await senderIdentityFor(env, envelope);
+
+        if (m === 'POST' && sub === '/auth-request') {
+          if (!requiresEmailAuth) return J({ ok: true, authRequired: false });
+          if (!env.SESSION_SECRET) return bad('signer verification is not configured', 503);
+          const sentAt = signer.auth_code_sent_at ? Date.parse(signer.auth_code_sent_at) : 0;
+          if (sentAt && Date.now() - sentAt < AUTH_CODE_RESEND_MS)
+            return bad('wait one minute before requesting another code', 429);
+          const since = new Date(Date.now() - 60 * 60_000).toISOString();
+          const recent = await env.DB.prepare(
+            "SELECT COUNT(*) c FROM events WHERE signer_id=? AND type='auth-code-sent' AND ts>=?")
+            .bind(signer.id, since).first();
+          if (recent.c >= 5) return bad('too many verification codes requested; try again later', 429);
+
+          const claimedAt = now();
+          const claim = await env.DB.prepare(`UPDATE signers SET auth_code_sent_at=? WHERE id=?
+            AND (auth_code_sent_at IS NULL OR auth_code_sent_at<=?)`)
+            .bind(claimedAt, signer.id, new Date(Date.now() - AUTH_CODE_RESEND_MS).toISOString()).run();
+          if (!claim.meta.changes) return bad('wait one minute before requesting another code', 429);
+          const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, '0');
+          const expiresAt = new Date(Date.now() + AUTH_CODE_TTL_MS).toISOString();
+          const hash = await authCodeHash(env, signer, code);
+          await env.DB.prepare(`UPDATE signers SET auth_code_hash=?, auth_code_expires_at=?, auth_failures=0 WHERE id=?`)
+            .bind(hash, expiresAt, signer.id).run();
+          try {
+            const result = await env.EMAIL.send(buildVerificationEmail({
+              envelope, signer, sender: senderRow, code, expiresMinutes: AUTH_CODE_TTL_MS / 60_000,
+            }));
+            await audit(env, envelope.id, signer.id, 'auth-code-sent', req,
+              clean(result && result.messageId || 'accepted by Cloudflare Email Service'));
+          } catch (error) {
+            await env.DB.prepare(`UPDATE signers SET auth_code_hash=NULL, auth_code_expires_at=NULL,
+              auth_code_sent_at=NULL WHERE id=? AND auth_code_sent_at=?`).bind(signer.id, claimedAt).run();
+            await audit(env, envelope.id, signer.id, 'auth-code-failed', req, emailFailure(error));
+            return bad('verification email could not be sent; try again', 502);
+          }
+          return J({ ok: true, codeSent: true, maskedEmail: maskedEmail(signer.email), expiresInSeconds: AUTH_CODE_TTL_MS / 1000 });
+        }
+
+        if (m === 'POST' && sub === '/auth-verify') {
+          if (!requiresEmailAuth) return J({ ok: true, authRequired: false });
+          if (!env.SESSION_SECRET) return bad('signer verification is not configured', 503);
+          if ((signer.auth_failures || 0) >= 5) return bad('too many incorrect attempts; request a new code', 429);
+          const body = await req.json().catch(() => ({}));
+          const code = String(body.code || '').trim();
+          if (!/^\d{6}$/.test(code)) return bad('enter the six-digit code');
+          if (!signer.auth_code_hash || !signer.auth_code_expires_at || signer.auth_code_expires_at <= now())
+            return bad('verification code expired; request a new code', 410);
+          const supplied = await authCodeHash(env, signer, code);
+          if (supplied !== signer.auth_code_hash) {
+            await env.DB.prepare('UPDATE signers SET auth_failures=COALESCE(auth_failures,0)+1 WHERE id=?').bind(signer.id).run();
+            return bad('incorrect verification code', 401);
+          }
+          const authenticatedAt = now();
+          await env.DB.prepare(`UPDATE signers SET auth_code_hash=NULL, auth_code_expires_at=NULL,
+            auth_failures=0, last_authenticated_at=? WHERE id=?`).bind(authenticatedAt, signer.id).run();
+          await audit(env, envelope.id, signer.id, 'email-authenticated', req, maskedEmail(signer.email));
+          return J({ ok: true, authenticated: true }, 200, { 'set-cookie': await signerSessionCookie(env, signer) });
+        }
+
+        if (!authenticated) {
+          if (m === 'GET' && sub === '') return J({
+            authRequired: true,
+            maskedEmail: maskedEmail(signer.email),
+            signer: { name: signer.name, email: maskedEmail(signer.email), status: signer.status },
+          });
+          return bad('email verification required', 401);
+        }
         const myTurn = !isViewer && envelope.status === 'sent' && signer.status === 'pending' &&
           (envelope.routing === 'parallel' ||
             signersOnly.every(s => s.order_index >= signer.order_index || s.status === 'signed'));
@@ -468,11 +732,9 @@ export default {
           if (envelope.status !== 'voided' && signer.status !== 'signed') await audit(env, envelope.id, signer.id, 'viewed', req);
           const fields = (await getFields(env, envelope.id)).filter(f => f.signer_id === signer.id)
             .map(f => ({ id: f.id, type: f.type, page: f.page, x: f.x, y: f.y, w: f.w, h: f.h, required: f.required, value: f.value }));
-          const senderRow = envelope.sender_id
-            ? await env.DB.prepare('SELECT name,email FROM senders WHERE id=?').bind(envelope.sender_id).first() : null;
           return J({
             title: envelope.title, status: envelope.status,
-            sender: senderRow ? `${senderRow.name} (${senderRow.email} — unverified)` : 'Black Label Technologies',
+            sender: senderRow.verified ? `${senderRow.name} (${senderRow.email})` : `${senderRow.name} (${senderRow.email} — unverified)`,
             consentVersion: CONSENT_VERSION, viewer: isViewer, routing: envelope.routing,
             expiresAt: envelope.expires_at || null,
             signer: { name: signer.name, email: signer.email, status: signer.status, consented: !!signer.consent_at },
@@ -542,16 +804,29 @@ export default {
             .bind(now(), req.headers.get('cf-connecting-ip') || '', (req.headers.get('user-agent') || '').slice(0, 300), signer.id).run();
           if (!claim.meta.changes) return bad('already signed', 409);
           await audit(env, envelope.id, signer.id, 'signed', req);
-          const remaining = await env.DB.prepare("SELECT name FROM signers WHERE envelope_id=? AND role='signer' AND status!='signed' ORDER BY order_index").bind(envelope.id).all();
+          const remaining = await env.DB.prepare("SELECT * FROM signers WHERE envelope_id=? AND role='signer' AND status!='signed' ORDER BY order_index").bind(envelope.id).all();
           if (remaining.results.length === 0) {
-            try { await finalize(env, envelope, req); }
+            let sealed = false;
+            try { await finalize(env, envelope, req); sealed = true; }
             catch (e) {
               // Signature is recorded; ensureFinalized() re-runs sealing on any later read.
               console.error('finalize failed, will retry on read', envelope.id, e && e.stack || e);
             }
-            return J({ ok: true, completed: true });
+            if (!sealed) return J({ ok: true, completed: false, sealing: true });
+            const completedEnvelope = await getEnvelope(env, envelope.id);
+            const allRecipients = await getSigners(env, envelope.id);
+            const senderIdentity = await senderIdentityFor(env, completedEnvelope);
+            const completionDelivery = [];
+            for (const recipient of allRecipients)
+              completionDelivery.push(await deliverRecipientEmail(env, completedEnvelope, recipient, 'completion', senderIdentity));
+            return J({ ok: true, completed: true,
+              delivery: { accepted: completionDelivery.filter(x => x.state === 'accepted').length,
+                          failed: completionDelivery.filter(x => x.state === 'failed').length } });
           }
-          return J({ ok: true, completed: false, next: remaining.results[0].name });
+          let nextDelivery = null;
+          if (envelope.routing !== 'parallel')
+            nextDelivery = await deliverRecipientEmail(env, envelope, remaining.results[0], 'request');
+          return J({ ok: true, completed: false, next: remaining.results[0].name, nextDelivery });
         }
 
         if (m === 'GET' && sub === '/download') {
@@ -692,7 +967,7 @@ async function verifyPage(env, id) {
 <title>Verify — BL Sign</title><link rel="stylesheet" href="/assets/app.css"></head><body>
 <div class="wrap narrow"><div class="card">
 <h1 class="gold">BL Sign — Envelope Verification</h1>
-<p class="muted">Black Label Technologies · sign.blacklabeltec.com</p>
+<p class="muted">BlackLabel Tech · sign.blacklabeltec.com</p>
 <table class="kv">
 <tr><td>Envelope</td><td class="mono">${esc(envelope.id)}</td></tr>
 <tr><td>Title</td><td>${esc(envelope.title)}</td></tr>

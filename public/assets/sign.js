@@ -10,12 +10,54 @@ let session, pageEls = [], values = {}, activeSigField = null;
 
 function statusCard(html) { const c = $('#statuscard'); c.style.display = ''; c.innerHTML = html; }
 
+function showEmailAuth(d) {
+  $('#authcard').style.display = '';
+  $('#authintro').textContent = `Send a one-time code to ${d.maskedEmail} to securely open this document.`;
+  const message = $('#authmsg');
+  const send = $('#sendcode');
+  const requestCode = async () => {
+    send.disabled = true;
+    message.textContent = 'Sending code...';
+    const response = await fetch(`/api/session/${token}/auth-request`, { method: 'POST' });
+    const body = await response.json();
+    if (!response.ok) {
+      message.textContent = body.error || 'Could not send the verification code.';
+      send.disabled = false;
+      return;
+    }
+    $('#authentry').style.display = '';
+    $('#authcode').focus();
+    send.textContent = 'Send another code';
+    send.disabled = false;
+    message.textContent = `Code sent to ${body.maskedEmail}. It expires in 10 minutes.`;
+  };
+  send.onclick = requestCode;
+  $('#verifycode').onclick = async () => {
+    const code = $('#authcode').value.trim();
+    if (!/^\d{6}$/.test(code)) { message.textContent = 'Enter the six-digit code.'; return; }
+    $('#verifycode').disabled = true;
+    const response = await fetch(`/api/session/${token}/auth-verify`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      message.textContent = body.error || 'Verification failed.';
+      $('#verifycode').disabled = false;
+      return;
+    }
+    location.reload();
+  };
+  $('#authcode').onkeydown = event => { if (event.key === 'Enter') $('#verifycode').click(); };
+}
+
 async function init() {
   const r = await fetch(`/api/session/${token}`);
   const d = await r.json();
   if (!r.ok) { statusCard(`<h1>Link not valid</h1><p class="muted">${esc(d.error || '')}</p>`); return; }
   session = d;
   $('#who').textContent = `${d.signer.name} · ${d.signer.email}`;
+
+  if (d.authRequired) { showEmailAuth(d); return; }
 
   if (d.status === 'voided') { statusCard('<h1>This envelope was voided</h1><p class="muted">Contact the sender if you believe this is an error.</p>'); return; }
   if (d.status === 'declined') { statusCard('<h1>Envelope declined</h1><p class="muted">A recipient declined to sign, which closed this envelope. Contact the sender to restart.</p>'); return; }
@@ -95,22 +137,35 @@ function renderMyFields() {
     if (f.type === 'signature' || f.type === 'initials') {
       el.innerHTML = `<span class="hint">${f.type === 'initials' ? 'Initial' : '✍ Sign'} here</span>`;
       el.onclick = () => openSig(f);
+      el.tabIndex = 0;
+      el.setAttribute('role', 'button');
+      el.setAttribute('aria-label', f.type === 'initials' ? 'Add initials' : 'Add signature');
+      el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSig(f); } };
     } else if (f.type === 'date') {
       const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
       el.innerHTML = `<input value="${today}">`;
+      el.querySelector('input').setAttribute('aria-label', 'Signing date');
       values[f.id] = { v: today };
       el.querySelector('input').oninput = e => { values[f.id] = { v: e.target.value }; checkDone(); };
     } else if (f.type === 'text') {
       el.innerHTML = `<input placeholder="...">`;
+      el.querySelector('input').setAttribute('aria-label', 'Required text');
       el.querySelector('input').oninput = e => { values[f.id] = { v: e.target.value }; checkDone(); };
     } else if (f.type === 'checkbox') {
       el.innerHTML = `<span class="hint"></span>`;
-      el.onclick = () => {
+      el.tabIndex = 0;
+      el.setAttribute('role', 'checkbox');
+      el.setAttribute('aria-label', 'Checkbox');
+      el.setAttribute('aria-checked', 'false');
+      const toggleCheckbox = () => {
         const on = !(values[f.id] && values[f.id].v);
         values[f.id] = { v: on ? '1' : '' };
         el.querySelector('.hint').textContent = on ? '✕' : '';
         el.classList.toggle('done', on);
+        el.setAttribute('aria-checked', on ? 'true' : 'false');
       };
+      el.onclick = toggleCheckbox;
+      el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCheckbox(); } };
     }
     pe.overlay.appendChild(el);
   }
@@ -211,7 +266,7 @@ $('#decline').onclick = async () => {
   const d = await r.json();
   if (!r.ok) { toast(d.error || 'Failed'); return; }
   $('#doccard').style.display = 'none';
-  statusCard('<h1>Declined</h1><p class="muted">The sender has been notified in the audit log. Nothing was signed.</p>');
+  statusCard('<h1>Declined</h1><p class="muted">Your decision was recorded in the envelope audit log. Nothing was signed.</p>');
 };
 $('#finish').onclick = async () => {
   $('#finish').disabled = true;
@@ -227,6 +282,8 @@ $('#finish').onclick = async () => {
   if (d.completed)
     statusCard(`<h1>✓ All done</h1><p class="muted" style="margin:8px 0 14px">Everyone has signed. Your copy is ready.</p>
       <a class="btn" href="/api/session/${token}/download">Download signed PDF</a>${upsell}`);
+  else if (d.sealing)
+    statusCard(`<h1>✓ Signature recorded</h1><p class="muted">The completed PDF is still being sealed. Reopen this recipient link shortly to download it.</p>${upsell}`);
   else
     statusCard(`<h1>✓ Signed</h1><p class="muted">Thanks — ${esc(d.next)} signs next. Once everyone has signed, this same link lets you download the completed PDF.</p>${upsell}`);
 };

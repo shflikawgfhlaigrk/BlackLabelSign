@@ -10,6 +10,20 @@
 
 <div id="statuscard" class="card" style="display:none"></div>
 
+<div id="authcard" class="card" style="display:none;max-width:520px;margin:48px auto">
+  <p class="muted small" style="margin:0 0 8px">RECIPIENT VERIFICATION</p>
+  <h1 style="font-size:24px;margin:0 0 10px">Confirm your email</h1>
+  <p class="muted" id="authintro">Request a one-time code to securely open this document.</p>
+  <div class="row" id="authentry" style="display:none;margin-top:16px">
+    <input id="authcode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6-digit code" aria-label="Six-digit verification code" style="font:700 20px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em">
+    <button id="verifycode">Verify</button>
+  </div>
+  <div class="row" style="margin-top:14px">
+    <button id="sendcode">Send verification code</button>
+  </div>
+  <p class="muted small" id="authmsg" role="status" style="margin:12px 0 0"></p>
+</div>
+
 <div id="consentcard" class="card" style="display:none">
   <h1 id="ctitle" style="font-size:19px"></h1>
   <p class="muted" style="margin:4px 0 14px" id="csender"></p>
@@ -59,5 +73,5 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
-<script type="module" src="/assets/sign.js"></script>
+<script type="module" src="/assets/sign.js?v=20260730-otp1"></script>
 </body></html>

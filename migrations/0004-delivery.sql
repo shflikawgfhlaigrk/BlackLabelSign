@@ -1,0 +1,10 @@
+ALTER TABLE signers ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'not_sent';
+ALTER TABLE signers ADD COLUMN delivery_message_id TEXT;
+ALTER TABLE signers ADD COLUMN delivery_at TEXT;
+ALTER TABLE signers ADD COLUMN delivery_error TEXT;
+ALTER TABLE signers ADD COLUMN last_delivery_kind TEXT;
+ALTER TABLE signers ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE signers ADD COLUMN reminder_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE signers ADD COLUMN last_reminded_at TEXT;
+CREATE INDEX IF NOT EXISTS idx_signers_delivery ON signers(delivery_status, delivery_at);
+CREATE INDEX IF NOT EXISTS idx_env_status_expiry ON envelopes(status, expires_at);
