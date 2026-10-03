@@ -132,8 +132,8 @@ export async function createHarness({ origin = 'https://localhost', database = '
 export async function serveHarness({ port = 0, transport = 'https', requestHook } = {}) {
   if (!['https', 'http'].includes(transport)) throw new Error('Local preview transport must be https or http');
   const harness = await createHarness();
-  // Deliberately untrusted, static synthetic TLS material; no system trust or
-  // deployed credentials are changed. Clients trust this loopback fixture only.
+  // Static synthetic TLS material is trusted explicitly by sandboxFetch only.
+  // No system trust or deployed credentials are changed.
   const handler = async (req, res) => {
     try {
       // An optional private tooling hook is outside the exact Worker. It never
@@ -196,12 +196,27 @@ export function candidateIdentity() {
 }
 
 export async function sandboxFetch(harness, path, options = {}) {
-  // Trust is scoped to this request and this harness's loopback origin. No
-  // global NODE_TLS_REJECT_UNAUTHORIZED or production TLS bypass is used.
-  const req = new Request(harness.origin + path, options);
+  // Validate the authority and root-relative path before any connection. Trust
+  // only the private fixture certificate, with ordinary TLS and SAN checks.
+  const origin = new URL(harness.origin);
+  if (origin.protocol !== 'https:' || !['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname) ||
+      !origin.port || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash)
+    throw new Error('sandboxFetch requires a bare loopback HTTPS harness origin with an explicit port');
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || /[\\\s\u0000-\u001f\u007f#]/.test(path))
+    throw new Error('sandboxFetch requires a root-relative local path');
+  let decodedPath;
+  try { decodedPath = decodeURIComponent(path.split('?')[0]); } catch { throw new Error('sandboxFetch requires a valid local path'); }
+  if (/[\\\s\u0000-\u001f\u007f]/.test(decodedPath) || /(?:^|\/)\.{1,2}(?:\/|$)/.test(decodedPath))
+    throw new Error('sandboxFetch rejects path traversal and encoded path controls');
+  const target = new URL(path, origin);
+  if (target.origin !== origin.origin) throw new Error('sandboxFetch target must remain on the harness origin');
+  const req = new Request(target, options);
+  if (req.headers.has('host') && req.headers.get('host') !== origin.host)
+    throw new Error('sandboxFetch rejects a different Host authority');
   const body = ['GET', 'HEAD'].includes(req.method) ? undefined : Buffer.from(await req.arrayBuffer());
   return new Promise((resolve, reject) => {
-    const pending = httpsRequest(req.url, { method: req.method, headers: Object.fromEntries(req.headers), rejectUnauthorized: false }, async incoming => {
+    const pending = httpsRequest(req.url, { method: req.method, headers: Object.fromEntries(req.headers),
+      ca: readFileSync(new URL('../fixtures/localhost-TEST-ONLY.crt', import.meta.url)), rejectUnauthorized: true }, async incoming => {
       try {
         const chunks = []; for await (const chunk of incoming) chunks.push(chunk);
         resolve(new Response(['HEAD'].includes(req.method) || [204, 304].includes(incoming.statusCode) ? null : Buffer.concat(chunks),

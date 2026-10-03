@@ -1,4 +1,5 @@
 import { MAIL_FROM } from './mail.mjs';
+import { generateAuthCode } from './auth-code.mjs';
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', ...headers } });
 const fail = (error, status = 400) => json({ error }, status);
 const uid = () => crypto.randomUUID().replaceAll('-', '');
@@ -20,7 +21,7 @@ export async function recoverSender(req, env, reserveUsage) {
       { scope: 'account', max: 5, hourly: true }, { scope: 'network', max: 20, hourly: true }, { scope: 'global', max: 500, hourly: true },
     ])) return fail('Too many recovery requests. Please try again in an hour.', 429);
     const challenge = uid();
-    const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, '0');
+    const code = generateAuthCode();
     const hash = await codeHash(env, challenge, code);
     await env.DB.prepare(`INSERT INTO sender_recovery (id,email,code_hash,expires_at)
       VALUES (?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now','+10 minutes'))`).bind(challenge, email, hash).run();

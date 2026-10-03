@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PRIVATE_EMAIL, PrivateEmailTransport, restPayload, reviewedTemplates } from '../scripts/private-email-transport.mjs';
 import { preparePrivateReview, startPrivateEmailReview } from '../scripts/private-email-review.mjs';
 
@@ -13,6 +14,10 @@ import { preparePrivateReview, startPrivateEmailReview } from '../scripts/privat
 const owner = 'owner@example.test', origin = 'http://localhost:18889';
 const link = `${origin}/s/SYNTHETIC_PRIVATE_LINK_ONLY`;
 const hash = value => createHash('sha256').update(value).digest('hex');
+const importProbe = fileURLToPath(new URL('./fixtures/import-with-no-fetch.mjs', import.meta.url));
+const importWithoutFetch = moduleUrl => JSON.parse(execFileSync(process.execPath, [importProbe, moduleUrl], {
+  encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+}));
 function workerMail(kind, { code = '123456', documentLink = link, address = owner, privateOrigin = origin } = {}) {
   const prepared = reviewedTemplates(address, privateOrigin).templates[kind];
   const mail = { to: { email: address, name: PRIVATE_EMAIL.signerName }, from: { email: prepared.from, name: 'BL Sign' },
@@ -47,7 +52,7 @@ test('private fake REST: preparation/import create zero calls; explicit allowlis
   globalThis.fetch = () => { calls++; throw new Error('No provider call permitted'); };
   try {
     const file = new URL('../scripts/private-email-review.mjs', import.meta.url).href;
-    execFileSync(process.execPath, ['--input-type=module', '-e', `globalThis.fetch=()=>{throw Error('IMPORT SENT')};await import(${JSON.stringify(file)});`]);
+    assert.deepEqual(importWithoutFetch(file), { imported: true, providerCalls: 0, marker: null });
     const f = fixture(t, { fetchImpl: globalThis.fetch });
     assert.equal(f.adapter.summary().enabled, false); assert.equal(f.adapter.summary().reservedAttempts, 0);
     await assert.rejects(f.adapter.send(workerMail('invitation')), /owner readiness/);
@@ -58,6 +63,26 @@ test('private fake REST: preparation/import create zero calls; explicit allowlis
     assert.equal(prepared.templates.title, PRIVATE_EMAIL.title); assert.equal(Object.keys(prepared.templates.templates).length, 4);
     assert.match(readFileSync(prepared.path, 'utf8'), /inert placeholders/); assert.equal(calls, 0);
   } finally { globalThis.fetch = original; }
+});
+
+test('private import probe keeps quotes, spaces and Unicode file paths as argv data', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'bl-sign-import-probe-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  for (const name of ["single'quote.mjs", 'double"quote.mjs', 'spaces and snowman-☃.mjs', 'backtick`dollar$.mjs']) {
+    const file = join(directory, name);
+    writeFileSync(file, 'export const marker = "test-owned import fixture";\n');
+    assert.deepEqual(importWithoutFetch(pathToFileURL(file).href), {
+      imported: true, providerCalls: 0, marker: 'test-owned import fixture',
+    });
+  }
+});
+
+test('private import probe detects an import-time provider fetch', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'bl-sign-import-fetch-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const file = join(directory, 'attempt-fetch.mjs');
+  writeFileSync(file, 'try { await fetch("https://provider.example.test"); } catch {}\n');
+  assert.throws(() => importWithoutFetch(pathToFileURL(file).href), /Import attempted a provider fetch/);
 });
 
 test('private fake REST: named Worker fields map to string addresses and message_id becomes an acceptance receipt', async t => {

@@ -1,6 +1,7 @@
 // BL Sign — self-hosted e-signature (ESIGN/UETA: intent, consent, attribution, integrity, retention)
 import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib';
 import { recoverSender, senderCookie } from './sender-recovery.mjs';
+import { generateAuthCode } from './auth-code.mjs';
 import { fieldPlacement } from './pdf-geometry.mjs';
 import { buildDeliveryEmail, buildVerificationEmail, MAIL_FROM } from './mail.mjs';
 import { normalizeSignaturePng, InvalidSignatureImage, MAX_SIGNATURE_BYTES } from './signature-png.mjs';
@@ -1229,7 +1230,7 @@ export default {
             .bind(signer.id, since).first();
           if (recent.c >= 5) return bad('too many verification codes requested; try again later', 429);
 
-          const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, '0');
+          const code = generateAuthCode();
           const hash = await authCodeHash(env, signer, code);
           const challengeId = uid();
           // Publish the challenge and reserve the resend window together. A

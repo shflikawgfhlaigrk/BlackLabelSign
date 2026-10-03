@@ -1,12 +1,43 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
+import { fileURLToPath } from 'node:url';
 
 const html = readFileSync(new URL('../public/landing.html', import.meta.url), 'utf8');
-const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)[1];
+const scriptParser = fileURLToPath(new URL('./fixtures/extract-inline-script.py', import.meta.url));
+// Parse HTML tags and raw script text. This extracts the shipped test subject;
+// it is never used as a production sanitizer or to execute supplied HTML.
+function inlineScript(source) {
+  const sources = JSON.parse(execFileSync('python3', [scriptParser], { input: source, encoding: 'utf8' }));
+  assert.ok(sources.length, 'Expected a complete classic inline landing script.');
+  return sources.at(-1);
+}
+const script = inlineScript(html);
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const reply = (data, status = 200) => new Response(JSON.stringify(data), { status });
+
+test('landing script extraction handles uppercase, mixed case, attributes and raw script text', () => {
+  const expected = 'const text = "<script> &amp; </not-script>";';
+  for (const [open, close] of [
+    ['<SCRIPT>', '</SCRIPT>'],
+    ['<ScRiPt data-example="angle > bracket" TYPE="text/javascript">', '</sCrIpT >'],
+    ['<script type="application/javascript" nonce="test-only">', '</script\n>'],
+  ]) assert.equal(inlineScript(`<p>fixture</p>${open}${expected}${close}`), expected);
+});
+test('landing extraction skips external scripts, inert JSON and commented markup, and selects the last inline script', () => {
+  assert.equal(inlineScript('<!-- <SCRIPT>commented</SCRIPT> --><script>first</script>' +
+    '<SCRIPT SRC="/test-only.js">external fallback</SCRIPT><script>last</script>' +
+    '<script type="application/ld+json">{"fixture":true}</script>'), 'last');
+});
+test('landing extraction fails when the expected complete script is absent', () => {
+  for (const absent of ['<p>No script</p>', '<script src="/test-only.js"></script>', '<SCRIPT>unclosed'])
+    assert.throws(() => inlineScript(absent), /Expected a complete classic inline landing script/);
+});
+test('landing extraction follows HTML closing-tag behavior inside a JavaScript string', () => {
+  assert.equal(inlineScript('<script>const text = "</ScRiPt>";</script>'), 'const text = "');
+});
 
 // Exercise the shipped script with DOM controls and a recording transport.
 // There are no production accounts, uploads, email sends, or network requests.

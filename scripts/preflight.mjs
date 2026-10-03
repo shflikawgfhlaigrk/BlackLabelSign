@@ -40,11 +40,25 @@ export function assessPrivateConfig(config) {
   return { state: failures.length ? 'INVALID' : 'LOCAL_ONLY', failures };
 }
 
+export function matchesSignRoutePattern(pattern) {
+  if (typeof pattern !== 'string' || /[\s\\?#]/.test(pattern)) return false;
+  // Worker routes allow an optional HTTP(S) scheme and path wildcards. The
+  // authority must be exact: neither hostname prefixes nor URL credentials
+  // establish that a route belongs to BL Sign.
+  const parts = /^(?:(https?):\/\/)?([^/]+)(\/.*)?$/i.exec(pattern);
+  if (!parts || parts[2].toLowerCase() !== 'sign.blacklabeltec.com') return false;
+  try {
+    const route = new URL(`${parts[1] || 'https'}://${parts[2]}${parts[3] || '/'}`);
+    return ['http:', 'https:'].includes(route.protocol) && route.hostname === 'sign.blacklabeltec.com' &&
+      !route.port && !route.username && !route.password && !route.search && !route.hash;
+  } catch { return false; }
+}
+
 export function summarizeCache(snapshot) {
   if (!snapshot?.data) return unknown('installed Cloudflare cache unavailable');
   const data = snapshot.data;
   const worker = (data.workers || []).find(item => item.id === 'bl-sign');
-  const routes = (data.routes || []).filter(item => String(item.pattern || '').startsWith('sign.blacklabeltec.com'));
+  const routes = (data.routes || []).filter(item => matchesSignRoutePattern(item.pattern));
   return {
     state: snapshot.stale ? 'STALE' : 'CACHED_METADATA',
     checkedAt: Number.isFinite(snapshot.checked_at) ? new Date(snapshot.checked_at * 1000).toISOString() : null,

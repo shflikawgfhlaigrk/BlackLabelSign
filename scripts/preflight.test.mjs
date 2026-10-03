@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { assessPrivateConfig, summarizeCache, liveMetadata, codeFingerprints } from './preflight.mjs';
+import { assessPrivateConfig, summarizeCache, liveMetadata, codeFingerprints, matchesSignRoutePattern } from './preflight.mjs';
 
 const template = JSON.parse(await readFile(new URL('../config/templates/wrangler.private.example.json', import.meta.url), 'utf8'));
 
@@ -34,6 +34,25 @@ test('unavailable or stale cache never establishes functional live state', () =>
   assert.equal(stale.state, 'STALE');
   assert.equal(stale.liveBindingAndSecretState, 'UNKNOWN');
   assert.equal(stale.wrapperPreservationRequired, true);
+});
+
+test('cached Sign route patterns require the exact hostname with supported schemes and path wildcards', () => {
+  const accepted = ['sign.blacklabeltec.com', 'sign.blacklabeltec.com/*', 'sign.blacklabeltec.com/api/*',
+    'sign.blacklabeltec.com/e/*', 'http://sign.blacklabeltec.com/*', 'https://sign.blacklabeltec.com/me',
+    'https://SIGN.BLACKLABELTEC.COM/e/*'];
+  const rejected = ['sign.blacklabeltec.com.attacker.example/*', 'sign.blacklabeltec.comevil/*',
+    'sign.blacklabeltec.com@attacker.example/*', 'user:password@sign.blacklabeltec.com/*',
+    'sub.sign.blacklabeltec.com/*', '*.sign.blacklabeltec.com/*', 'sign.blacklabeltec.com:443/*',
+    'sign.blacklabeltec.com./*', 'ftp://sign.blacklabeltec.com/*', 'javascript:sign.blacklabeltec.com',
+    '//sign.blacklabeltec.com/*', 'https:/sign.blacklabeltec.com/*', 'sign.blacklabeltec.com\\@attacker.example/*',
+    'sign.blacklabeltec.com/*?other=1', 'sign.blacklabeltec.com/*#fragment', 'sign.blacklabeltec.com\n/*', '', null];
+  for (const pattern of accepted) assert.equal(matchesSignRoutePattern(pattern), true, String(pattern));
+  for (const pattern of rejected) assert.equal(matchesSignRoutePattern(pattern), false, String(pattern));
+  const result = summarizeCache({ data: { routes: [
+    ...accepted.map(pattern => ({ pattern, worker: 'bl-sign' })),
+    ...rejected.map(pattern => ({ pattern, worker: 'counterfeit-route' })),
+  ] } });
+  assert.deepEqual(result.routeWorkers, ['bl-sign']);
 });
 
 test('missing explicit metadata credentials makes no network request', async () => {

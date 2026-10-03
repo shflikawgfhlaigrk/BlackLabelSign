@@ -24,9 +24,9 @@ Screenshots, a synthetic completed PDF, and a candidate source/hash manifest are
 For founder review on this machine:
 
 ```sh
-BL_SIGN_PREVIEW_PORT=18788 node scripts/private-preview.mjs
+BL_SIGN_PREVIEW_PORT=18789 node scripts/private-preview.mjs
 ```
 
-Open `http://localhost:18788/`, use a synthetic address such as `founder@example.test`, and a document visibly labeled **TEST ONLY — NOT A CONTRACT**. Open `http://localhost:18788/__sandbox/inbox` to read sandbox invitation links and codes. The running, verified listener is PID `83423`, execution session `50100`; use it while it remains active. Port 8788 is occupied by the existing Black Label MCP HTTP canary, so the launch recipe explicitly overrides the script's default. The default HTTP preview emulates edge TLS termination by adapting only the local scheme, same-loopback Origin and local response links. It does not prove production TLS behavior; the automated acceptance runs use direct HTTPS. To review the HTTPS harness instead, set `BL_SIGN_PREVIEW_TRANSPORT=https`. Stop the background preview process when review finishes.
+Open `http://localhost:18789/`, use a synthetic address such as `founder@example.test`, and a document visibly labeled **TEST ONLY — NOT A CONTRACT**. Open `http://localhost:18789/__sandbox/inbox` to read sandbox invitation links and codes. The running, verified listener is PID `83423`, execution session `50100`; use it while it remains active. Port 8788 is occupied by the existing Black Label MCP HTTP canary, so the launch recipe explicitly overrides the script's default. The default HTTP preview emulates edge TLS termination by adapting only the local scheme, same-loopback Origin and local response links. It does not prove production TLS behavior; the automated acceptance runs use direct HTTPS. To review the HTTPS harness instead, set `BL_SIGN_PREVIEW_TRANSPORT=https`. Stop the background preview process when review finishes.
 
 The preview is in-memory and resets when restarted. It is a private review route, not a public release. Founder acceptance, authorized public deployment and actual supported external-inbox receipt remain separate gates owned by the release task.
