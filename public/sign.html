@@ -8,12 +8,14 @@
   <span id="who" class="muted small"></span>
 </div>
 
-<div id="statuscard" class="card" style="display:none"></div>
+<p id="sign-message" class="notice" role="status" aria-live="polite">Opening your signing link…</p>
+<div id="statuscard" class="card state-card" style="display:none" tabindex="-1"></div>
 
 <div id="authcard" class="card" style="display:none;max-width:520px;margin:48px auto">
   <p class="muted small" style="margin:0 0 8px">RECIPIENT VERIFICATION</p>
   <h1 style="font-size:24px;margin:0 0 10px">Confirm your email</h1>
   <p class="muted" id="authintro">Request a one-time code to securely open this document.</p>
+  <p class="muted small" style="margin-top:10px">No account required. On a new device, open this same recipient link and verify your email again.</p>
   <div class="row" id="authentry" style="display:none;margin-top:16px">
     <input id="authcode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6-digit code" aria-label="Six-digit verification code" style="font:700 20px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em">
     <button id="verifycode">Verify</button>
@@ -45,9 +47,8 @@
 </div>
 
 <div id="doccard" style="display:none">
-  <div class="card row">
+  <div class="card row document-actions">
     <div class="grow"><b id="dtitle"></b><div class="muted small" id="dsub">Complete the highlighted fields, then finish.</div></div>
-    <button class="ghost" id="decline">Decline</button>
     <button id="finish" disabled>Finish &amp; Sign</button>
   </div>
   <div id="pages"></div>
@@ -57,21 +58,21 @@
 </div>
 
 <div class="mback" id="sigmodal">
-  <div class="modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Add your signature">
     <div class="tabs">
       <button id="tabdraw" class="on">Draw</button>
       <button id="tabtype">Type</button>
       <span class="sp" style="flex:1"></span>
       <button class="ghost" id="sigclear">Clear</button>
     </div>
-    <input id="typename" placeholder="Type your full name" style="display:none;margin-bottom:10px">
-    <canvas id="sigpad" width="1200" height="360" style="height:180px"></canvas>
+    <input id="typename" placeholder="Type your full name" aria-label="Name for your signature" maxlength="120" style="display:none;margin-bottom:10px">
+    <canvas id="sigpad" width="1200" height="360" aria-label="Draw your signature, or choose Type to enter your name" style="height:180px"></canvas>
     <div class="row" style="margin-top:14px;justify-content:flex-end">
       <button class="ghost" id="sigcancel">Cancel</button>
       <button id="sigadopt">Adopt signature</button>
     </div>
   </div>
 </div>
-<div class="toast" id="toast"></div>
-<script type="module" src="/assets/sign.js?v=20260730-otp1"></script>
+<div class="toast" id="toast" role="status"></div>
+<script type="module" src="/assets/sign.js"></script>
 </body></html>

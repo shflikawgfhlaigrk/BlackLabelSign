@@ -16,7 +16,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
   --bg: #050506; --txt: #edeae3; --mut: #9b958a; --acc: #f2f1ed; --acc2: #c9c8c3;
-  --line: rgba(255,255,255,.08); --card: rgba(255,255,255,.028);
+  --line: rgba(255,255,255,.08); --card: rgba(255,255,255,.028); --warm: #d6bd78;
   --serif: "New York", ui-serif, Georgia, "Times New Roman", serif;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
 }
@@ -28,6 +28,12 @@ body::before { content: ""; position: fixed; inset: -20% -10% auto; height: 90vh
 .wrap { position: relative; z-index: 1; max-width: 1120px; margin: 0 auto; padding: 0 28px; }
 a { color: var(--acc2); text-decoration: none; }
 a:hover { text-decoration: underline; }
+a:focus-visible, button:focus-visible, input:focus-visible { outline: 3px solid var(--warm); outline-offset: 3px; }
+.skip { position: fixed; z-index: 20; left: 16px; top: 12px; padding: 10px 14px; border-radius: 8px;
+  color: #111; background: #fff; transform: translateY(-160%); }
+.skip:focus { transform: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
 /* nav */
 nav { display: flex; align-items: center; gap: 26px; padding: 26px 0 0; }
@@ -47,9 +53,13 @@ h1 .g { background: linear-gradient(100deg, #ffffff 5%, #d9d8d3 55%, #8f8e89 95%
 
 /* start form */
 .start { display: flex; flex-direction: column; gap: 10px; max-width: 420px; }
+.start label, .panel label { display: block; font-size: 14px; font-weight: 600; }
+.field-error { color: #e8a2a5; font-size: 13.5px; }
+.field-error:empty { display: none; }
+input[aria-invalid="true"] { border-color: #e8a2a5 !important; }
 .start input { background: rgba(255,255,255,.045); border: 1px solid var(--line); color: var(--txt);
   border-radius: 12px; padding: 14px 16px; font: inherit; font-size: 15px; transition: border-color .18s, background .18s; }
-.start input::placeholder { color: #6f6a61; }
+.start input::placeholder { color: #9b958a; }
 .start input:focus { outline: none; border-color: rgba(255,255,255,.55); background: rgba(255,255,255,.06); }
 .cta { position: relative; border: none; cursor: pointer; border-radius: 12px; padding: 15px 22px;
   font: 650 15.5px var(--sans); color: #0c0c0d; letter-spacing: .01em;
@@ -58,7 +68,7 @@ h1 .g { background: linear-gradient(100deg, #ffffff 5%, #d9d8d3 55%, #8f8e89 95%
   transition: transform .16s, box-shadow .16s, filter .16s; }
 .cta:hover { transform: translateY(-1px); filter: brightness(1.05); box-shadow: 0 1px 0 rgba(255,255,255,.35) inset, 0 -10px 22px rgba(0,0,0,.18) inset, 0 16px 40px rgba(255,255,255,.18); }
 .cta:disabled { opacity: .5; transform: none; cursor: default; }
-.tiny { font-size: 12.5px; color: #756f65; }
+.tiny { font-size: 12.5px; color: #aaa398; }
 .err { color: #e8a2a5; font-size: 13.5px; min-height: 18px; }
 
 /* document mock */
@@ -77,7 +87,7 @@ h1 .g { background: linear-gradient(100deg, #ffffff 5%, #d9d8d3 55%, #8f8e89 95%
 .sigline svg path { stroke: #16161a; stroke-width: 3.4; fill: none; stroke-linecap: round;
   stroke-dasharray: 640; stroke-dashoffset: 640; animation: draw 2.1s .7s cubic-bezier(.45,0,.3,1) forwards; }
 @keyframes draw { to { stroke-dashoffset: 0; } }
-.sigcap { font: 600 9px var(--sans); color: #8a867c; letter-spacing: .14em; margin-top: 7px; }
+.sigcap { font: 600 9px var(--sans); color: #57544d; letter-spacing: .14em; margin-top: 7px; }
 .seal { position: absolute; right: -7%; bottom: 8%; width: 116px; height: 116px; border-radius: 50%;
   background: radial-gradient(circle at 32% 28%, #ffffff, #c9c8c3 55%, #7c7b76);
   box-shadow: 0 14px 34px rgba(0,0,0,.5), 0 0 0 5px rgba(255,255,255,.12);
@@ -94,6 +104,90 @@ h1 .g { background: linear-gradient(100deg, #ffffff 5%, #d9d8d3 55%, #8f8e89 95%
 .hash i { color: #ffffff; font-style: normal; margin-right: 8px; }
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
 
+/* signing workflow */
+.flow-showcase { padding: 0 0 78px; perspective: 1400px; }
+.flow-head { display: flex; align-items: end; justify-content: space-between; gap: 28px; margin-bottom: 20px; }
+.flow-kicker { color: var(--warm); font-size: 11px; font-weight: 750; letter-spacing: .2em; margin-bottom: 7px; }
+.flow-head h2 { font-size: clamp(30px, 4vw, 44px); line-height: 1.08; margin: 0; }
+.flow-head > p { color: var(--mut); font-size: 14px; margin-bottom: 5px; }
+.flow-scene { position: relative; isolation: isolate; overflow: hidden; min-height: 318px; padding: 30px;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 28px; transform-style: preserve-3d;
+  background: radial-gradient(70% 120% at 50% -15%, rgba(214,189,120,.13), transparent 60%),
+              linear-gradient(145deg, rgba(255,255,255,.052), rgba(255,255,255,.018) 62%);
+  box-shadow: 0 34px 90px rgba(0,0,0,.34), 0 1px 0 rgba(255,255,255,.05) inset; }
+.flow-scene::before { content: ""; position: absolute; z-index: -1; inset: 0; pointer-events: none;
+  background: linear-gradient(105deg, transparent 28%, rgba(255,255,255,.09) 48%, transparent 68%);
+  transform: translateX(-120%); animation: flowSweep 4.4s .2s ease-out both; }
+.flow-scene::after { content: ""; position: absolute; z-index: -2; inset: 0; opacity: .18; pointer-events: none;
+  background-image: linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+  background-size: 42px 42px; mask-image: linear-gradient(to bottom, transparent, #000 32%, #000); }
+.flow-route { position: absolute; z-index: 0; top: 48px; left: 8%; width: 84%; height: 62px; overflow: visible; }
+.flow-route path { fill: none; stroke: rgba(214,189,120,.34); stroke-width: 1.25; stroke-linecap: round;
+  stroke-dasharray: 900; stroke-dashoffset: 900; animation: flowDraw 1.4s .35s ease-out forwards; }
+.flow-route circle { fill: var(--bg); stroke: var(--warm); stroke-width: 1.5; }
+.flow-packet { position: absolute; z-index: 3; top: 38px; left: 10%; width: 40px; height: 52px; border-radius: 5px;
+  pointer-events: none; background: linear-gradient(145deg, #fffef9, #c9c5b8); color: #171719;
+  border: 1px solid rgba(255,255,255,.8); box-shadow: 0 12px 30px rgba(0,0,0,.48), 8px 10px 22px rgba(214,189,120,.11);
+  transform-style: preserve-3d; animation: flowPacket 4.6s cubic-bezier(.22,.72,.2,1) both; }
+.flow-packet::before { content: ""; position: absolute; top: 9px; left: 8px; right: 8px; height: 17px;
+  background: repeating-linear-gradient(to bottom, #757168 0 2px, transparent 2px 6px); opacity: .65; }
+.flow-packet::after { content: "PDF"; position: absolute; left: 8px; bottom: 6px; font: 800 7px/1 var(--sans); letter-spacing: .12em; }
+.flow-rail { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+  margin-top: 74px; list-style: none; transform-style: preserve-3d; }
+.flow-stage { --tilt: 0deg; position: relative; min-height: 190px; overflow: hidden; padding: 21px;
+  border: 1px solid rgba(255,255,255,.1); border-radius: 20px; transform-style: preserve-3d;
+  background: linear-gradient(150deg, rgba(255,255,255,.075), rgba(255,255,255,.018));
+  box-shadow: 0 20px 46px rgba(0,0,0,.25), 0 1px 0 rgba(255,255,255,.05) inset;
+  transform: rotateY(var(--tilt)); transition: transform .3s ease, border-color .3s ease;
+  animation: flowStageIn .72s .35s ease-out both; }
+.flow-stage:nth-child(1) { --tilt: 2.4deg; }
+.flow-stage:nth-child(2) { animation-delay: .52s; }
+.flow-stage:nth-child(3) { --tilt: -2.4deg; animation-delay: .69s; }
+.flow-stage:hover { transform: rotateY(var(--tilt)) translateY(-3px) translateZ(12px); border-color: rgba(214,189,120,.38); }
+.flow-index { display: block; color: var(--warm); font: 750 10px/1 var(--sans); letter-spacing: .18em; margin-bottom: 11px; }
+.flow-stage h3 { font-size: 16px; line-height: 1.2; margin-bottom: 4px; }
+.flow-stage p { color: var(--mut); font-size: 13px; }
+.flow-object { position: absolute; right: 18px; bottom: 16px; width: 128px; height: 92px; transform: translateZ(28px); }
+.flow-doc { position: absolute; left: 5px; bottom: 0; width: 64px; height: 82px; border-radius: 6px;
+  background: linear-gradient(145deg, #fffef9, #cfcbc0); box-shadow: 0 14px 28px rgba(0,0,0,.42); transform: rotate(-7deg); }
+.flow-doc::before { content: ""; position: absolute; inset: 14px 10px 23px;
+  background: repeating-linear-gradient(to bottom, #8d887d 0 2px, transparent 2px 8px); opacity: .58; }
+.flow-doc::after { content: "PDF"; position: absolute; left: 10px; bottom: 8px; color: #2a2926;
+  font: 800 7px/1 var(--sans); letter-spacing: .13em; }
+.flow-upload { position: absolute; right: 10px; top: 9px; display: grid; place-items: center; width: 44px; height: 44px;
+  border-radius: 50%; color: #171719; font-size: 21px; background: linear-gradient(145deg, #f7e7b9, #bca15d);
+  box-shadow: 0 12px 24px rgba(0,0,0,.35); }
+.field-doc { left: 13px; width: 72px; transform: rotate(3deg); }
+.field-box { position: absolute; z-index: 1; left: 25px; width: 45px; height: 9px; border: 1px solid #9b7b32;
+  border-radius: 2px; background: rgba(214,189,120,.2); transform: rotate(3deg); }
+.field-box.one { top: 31px; } .field-box.two { top: 49px; width: 34px; }
+.link-chip { position: absolute; z-index: 2; right: 0; bottom: 10px; display: grid; place-items: center; width: 54px; height: 27px;
+  border: 1px solid rgba(214,189,120,.48); border-radius: 999px; color: var(--warm); background: rgba(9,9,10,.92);
+  box-shadow: 0 10px 22px rgba(0,0,0,.4); font-size: 15px; }
+.flow-cert { position: absolute; right: 1px; bottom: 0; width: 78px; height: 88px; padding: 12px 9px;
+  border: 1px solid #dbd6c9; border-radius: 6px; color: #24231f; transform: rotate(5deg);
+  background: linear-gradient(145deg, #fffef9, #c8c4b8); box-shadow: 0 14px 30px rgba(0,0,0,.44); }
+.flow-cert::before { content: ""; display: block; width: 46px; height: 28px; margin: 0 auto;
+  background: repeating-linear-gradient(to bottom, #8b877e 0 2px, transparent 2px 7px); opacity: .55; }
+.flow-seal { position: absolute; right: 7px; bottom: 7px; display: grid; place-items: center; width: 31px; height: 31px;
+  border: 2px double #6d5928; border-radius: 50%; color: #443713; background: radial-gradient(circle, #f5df9f, #b4964d);
+  font: 900 13px/1 var(--sans); box-shadow: 0 6px 12px rgba(0,0,0,.24); }
+.flow-signature { position: absolute; left: 0; bottom: 18px; width: 72px; height: 30px; transform: rotate(-7deg); }
+.flow-signature path { fill: none; stroke: var(--warm); stroke-width: 2.2; stroke-linecap: round; }
+@keyframes flowSweep { 0% { transform: translateX(-120%); } 100% { transform: translateX(120%); } }
+@keyframes flowDraw { to { stroke-dashoffset: 0; } }
+@keyframes flowPacket {
+  0% { left: 10%; opacity: 0; transform: translateY(10px) rotateY(-22deg) rotateZ(-8deg); }
+  14% { opacity: 1; } 32% { left: 18%; transform: translateY(0) rotateY(-8deg) rotateZ(-4deg); }
+  61% { left: 50%; transform: translateX(-50%) rotateY(7deg) rotateZ(2deg); }
+  100% { left: 90%; opacity: 1; transform: translateX(-100%) rotateY(0) rotateZ(5deg); }
+}
+@keyframes flowStageIn {
+  from { opacity: .15; transform: translateY(16px) rotateX(8deg); }
+  to { opacity: 1; transform: rotateY(var(--tilt)); }
+}
+
 /* sections */
 .divider { height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,.3), transparent); }
 section { padding: 72px 0; }
@@ -108,14 +202,8 @@ h2 { font-family: var(--serif); font-size: 32px; font-weight: 620; letter-spacin
   color: var(--acc2); font-size: 17px; margin-bottom: 15px; }
 .feat b { display: block; font-size: 15.5px; margin-bottom: 7px; }
 .feat p { color: var(--mut); font-size: 13.8px; line-height: 1.55; }
-.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; counter-reset: st; }
-.step { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 26px 24px 24px; }
-.step::before { counter-increment: st; content: counter(st, decimal-leading-zero); position: absolute; top: 18px; right: 20px;
-  font: 700 13px var(--sans); letter-spacing: .1em; color: rgba(255,255,255,.4); }
-.step b { display: block; font-size: 16px; margin-bottom: 8px; }
-.step p { color: var(--mut); font-size: 14px; }
 .strip { display: flex; flex-wrap: wrap; gap: 10px 26px; justify-content: center; padding: 26px 0;
-  color: #877f72; font-size: 13px; letter-spacing: .04em; }
+  color: #aaa398; font-size: 13px; letter-spacing: .04em; }
 .strip span::before { content: "✓"; color: var(--acc); margin-right: 8px; }
 
 /* upload panel + final cta */
@@ -128,25 +216,56 @@ h2 { font-family: var(--serif); font-size: 32px; font-weight: 620; letter-spacin
 .cta2 { text-align: center; padding: 84px 0 96px; }
 .cta2 h2 { font-size: clamp(30px, 4vw, 44px); }
 .cta2 .lead { margin: 14px auto 30px; }
-footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: #756f65; font-size: 13px; line-height: 2; }
+footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: #aaa398; font-size: 13px; line-height: 2; }
+footer a { color: #d0cdc5; text-decoration: underline; text-underline-offset: 3px; }
+footer nav { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; max-width: 100%; padding: 8px 0 0; }
+footer nav span { min-width: 0; overflow-wrap: anywhere; }
 
 /* motion + responsive */
-.fx { opacity: 0; transform: translateY(18px); animation: fadeUp .8s cubic-bezier(.2,.7,.2,1) forwards; }
+.fx { opacity: 1; transform: translateY(18px); animation: startSlide .8s cubic-bezier(.2,.7,.2,1) forwards; }
+.mockwrap.fx { opacity: 0; animation-name: fadeUp; }
+#startcard.fx { opacity: 1; animation-name: startSlide; }
 .d1 { animation-delay: .08s; } .d2 { animation-delay: .18s; } .d3 { animation-delay: .28s; } .d4 { animation-delay: .4s; }
 @keyframes fadeUp { to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .fx, .sigline svg path, .seal, .hash { animation: none !important; opacity: 1 !important; transform: none !important; stroke-dashoffset: 0 !important; } }
+@keyframes startSlide { to { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .fx, .sigline svg path, .seal, .hash, .flow-scene::before, .flow-route path, .flow-packet, .flow-stage {
+    animation: none !important; opacity: 1 !important; transform: none !important; stroke-dashoffset: 0 !important; }
+  .flow-stage { transition: none; }
+  .flow-packet { left: 90%; transform: translateX(-100%) rotateZ(5deg) !important; }
+}
 @media (max-width: 900px) {
   .hero { grid-template-columns: 1fr; gap: 64px; padding-top: 54px; }
   .mockwrap { min-height: 0; max-width: 480px; margin: 0 auto; width: 100%;
     height: calc(min(82vw, 420px) * 1.4 + 70px); }
+  .flow-head { display: block; }
+  .flow-head > p { margin-top: 8px; }
+  .flow-scene { min-height: 0; padding: 24px; }
+  .flow-route, .flow-packet { display: none; }
+  .flow-rail { grid-template-columns: 1fr; margin-top: 0; padding-left: 16px; }
+  .flow-rail::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 1px;
+    background: linear-gradient(var(--warm), rgba(214,189,120,.12)); }
+  .flow-stage, .flow-stage:hover { min-height: 160px; padding-right: 164px; transform: none; }
   .grid4 { grid-template-columns: 1fr 1fr; }
-  .steps { grid-template-columns: 1fr; }
 }
-@media (max-width: 520px) { .grid4 { grid-template-columns: 1fr; } nav .links a.hide { display: none; } }
+@media (max-width: 520px) {
+  .grid4 { grid-template-columns: 1fr; }
+  nav .links a.hide { display: none; }
+  .mockwrap .page.cert, .mockwrap .seal { right: 0; }
+  .flow-showcase { padding-bottom: 58px; }
+  .flow-scene { padding: 18px; }
+  .flow-rail { padding-left: 0; }
+  .flow-rail::before { display: none; }
+  .flow-stage, .flow-stage:hover { min-height: 0; padding-right: 21px; transform: none; }
+  .flow-object { position: relative; right: auto; bottom: auto; width: 128px; height: 88px; margin: 17px 0 0 auto; }
+}
 </style></head>
 <body>
+<a class="skip" href="#main">Skip to main content</a>
+<main id="main">
 <div class="wrap">
-<nav class="fx">
+<nav class="fx" aria-label="Primary">
   <span class="logo"><b>BL</b> Sign</span>
   <span class="links">
     <a href="#how" class="hide">How it works</a>
@@ -162,22 +281,30 @@ footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: #756f65
     <p class="sub fx d2">Upload a PDF, place your fields, share a link. Every completed document
     carries a <b>burned-in certificate of completion</b> and <b>SHA-256 content hashes</b>
     anyone can compare against the live envelope record. Your counterparty needs no account. Neither does your wallet.</p>
-    <div class="start fx d3" id="startcard">
-      <input id="name" placeholder="Your name" autocomplete="name">
-      <input id="email" type="email" placeholder="you@company.com" autocomplete="email">
-      <button class="cta" id="start">Send my first document — free</button>
-      <div class="err" id="err"></div>
+    <form class="start fx d3" id="startcard" novalidate>
+      <label for="name">Your name</label>
+      <input id="name" placeholder="Your name" autocomplete="name" required maxlength="120" aria-describedby="name-error">
+      <span class="field-error" id="name-error"></span>
+      <label for="email">Email address</label>
+      <input id="email" type="email" placeholder="you@company.com" autocomplete="email" required maxlength="200" aria-describedby="email-error">
+      <span class="field-error" id="email-error"></span>
+      <button class="cta" id="start" type="submit">Continue to document upload — free</button>
+      <div class="err" id="err" role="status" aria-live="polite"></div>
       <span class="tiny">3 envelopes a day, free. Built around ESIGN &amp; UETA consent and evidence requirements.</span>
-    </div>
-    <div class="panel fx d3" id="upcard" style="display:none">
+    </form>
+    <form class="panel fx d3" id="upcard" style="display:none" novalidate>
       <h3>New envelope</h3>
       <div class="who" id="hello"></div>
-      <input type="text" id="title" placeholder='Document title — e.g. "Consulting Agreement"'>
-      <input type="file" id="file" accept="application/pdf">
-      <button class="cta" id="create" style="width:100%">Upload &amp; place fields</button>
-      <div class="err" id="err2"></div>
+      <label for="title">Document title</label>
+      <input type="text" id="title" placeholder='Document title — e.g. "Consulting Agreement"' required aria-describedby="title-error">
+      <span class="field-error" id="title-error"></span>
+      <label for="file">PDF document</label>
+      <input type="file" id="file" accept="application/pdf,.pdf" required aria-describedby="file-error">
+      <span class="field-error" id="file-error"></span>
+      <button class="cta" id="create" type="submit" style="width:100%">Upload &amp; place fields</button>
+      <div class="err" id="err2" role="status" aria-live="polite"></div>
       <span class="tiny">Free tier: 3 envelopes/day · 15MB · up to 8 signers · <a href="/me">my envelopes →</a></span>
-    </div>
+    </form>
   </div>
 
   <div class="mockwrap fx d3" aria-hidden="true">
@@ -202,6 +329,58 @@ footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: #756f65
     <div class="hash"><i>✓ VERIFIED</i>sha-256 · 0f00a276df74…e3bc</div>
   </div>
 </div>
+
+<section class="flow-showcase" id="how" aria-labelledby="flow-title">
+  <div class="flow-head">
+    <div>
+      <div class="flow-kicker">HOW IT WORKS</div>
+      <h2 id="flow-title">From document to proof</h2>
+    </div>
+    <p>One clear signing path.</p>
+  </div>
+  <div class="flow-scene">
+    <svg class="flow-route" viewBox="0 0 900 62" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M22 31 C 175 4, 270 58, 450 31 S 730 4, 878 31"></path>
+      <circle cx="22" cy="31" r="5"></circle>
+      <circle cx="450" cy="31" r="5"></circle>
+      <circle cx="878" cy="31" r="5"></circle>
+    </svg>
+    <span class="flow-packet" aria-hidden="true"></span>
+    <ol class="flow-rail">
+      <li class="flow-stage">
+        <span class="flow-index" aria-hidden="true">01</span>
+        <h3>Upload document</h3>
+        <p>Add your PDF.</p>
+        <div class="flow-object" aria-hidden="true">
+          <span class="flow-doc"></span>
+          <span class="flow-upload">↑</span>
+        </div>
+      </li>
+      <li class="flow-stage">
+        <span class="flow-index" aria-hidden="true">02</span>
+        <h3>Place &amp; share</h3>
+        <p>Set fields. Send the link.</p>
+        <div class="flow-object" aria-hidden="true">
+          <span class="flow-doc field-doc"></span>
+          <span class="field-box one"></span>
+          <span class="field-box two"></span>
+          <span class="link-chip">↗</span>
+        </div>
+      </li>
+      <li class="flow-stage">
+        <span class="flow-index" aria-hidden="true">03</span>
+        <h3>Sign &amp; complete</h3>
+        <p>Signed PDF, completion certificate, hash.</p>
+        <div class="flow-object" aria-hidden="true">
+          <svg class="flow-signature" viewBox="0 0 90 36">
+            <path d="M3 26 C 14 5, 24 4, 25 18 C 26 29, 16 31, 18 22 C 22 10, 37 12, 42 22 C 48 33, 56 9, 64 18 C 71 27, 76 16, 87 15"></path>
+          </svg>
+          <span class="flow-cert"><span class="flow-seal">✓</span></span>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
 </div>
 
 <div class="divider"></div>
@@ -218,15 +397,6 @@ footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: #756f65
   </div>
 </section>
 
-<section id="how">
-  <h2>Sixty seconds to sent</h2>
-  <div class="steps">
-    <div class="step"><b>Upload &amp; place</b><p>Drop in your PDF and click where signatures, initials, dates, and checkboxes go.</p></div>
-    <div class="step"><b>Share the links</b><p>Each signer gets a private signing link — send it by text, email, Slack, however you talk.</p></div>
-    <div class="step"><b>Completed &amp; verifiable</b><p>Signers consent and sign by drawing or typing. Each recipient link unlocks the completed PDF, with its verification page.</p></div>
-  </div>
-</section>
-
 <div class="strip">
   <span>ESIGN &amp; UETA consent workflow</span><span>Consent captured per signer</span>
   <span>IP + device audit trail</span><span>Public hash verification</span><span>Works on any phone</span>
@@ -235,50 +405,109 @@ footer { border-top: 1px solid var(--line); padding: 30px 0 46px; color: #756f65
 <div class="cta2">
   <h2>Stop renting your <span class="g" style="font-family:inherit">signatures.</span></h2>
   <p class="lead">Send your first document in the next minute.</p>
-  <button class="cta" onclick="document.getElementById('name')?.focus();window.scrollTo({top:0,behavior:'smooth'})">Start free</button>
+  <button class="cta" type="button" id="start-free">Start free</button>
 </div>
 </div>
+</main>
 
 <footer><div class="wrap">
   BL Sign is a <a href="https://blacklabeltec.com/network#bl-sign">BlackLabel Tech product</a> — custom software, automation, and AI systems for businesses that would rather own their tools than rent them.
   <a href="https://blacklabeltec.com/custom-software-development">Talk to us</a> about building yours.<br>
-  <a href="mailto:michael@blacklabelbots.com?subject=BL%20Sign%20abuse%20report">Report abuse</a> · <a href="/verify/" onclick="return false" style="color:#4d493f">Verify a document: sign.blacklabeltec.com/verify/&lt;envelope-id&gt;</a> · <a href="/admin" style="color:#4d493f">Admin</a>
+  <nav aria-label="Legal and support"><a href="/privacy">Privacy</a><span aria-hidden="true">·</span><a href="/terms">Terms</a><span aria-hidden="true">·</span><a href="/accessibility">Accessibility</a><span aria-hidden="true">·</span><a href="mailto:michael@blacklabelbots.com?subject=BL%20Sign%20abuse%20report">Report abuse</a><span aria-hidden="true">·</span><span>Verify with the address printed on the signed PDF</span><span aria-hidden="true">·</span><a href="/admin">Admin</a></nav>
 </div></footer>
 
 <script>
 const $ = s => document.querySelector(s);
+function fieldError(id, message) {
+  $('#' + id + '-error').textContent = message;
+  $('#' + id).setAttribute('aria-invalid', message ? 'true' : 'false');
+}
+function validate(fields, status) {
+  for (const [id, message] of fields) fieldError(id, message);
+  const first = fields.find(([, message]) => message);
+  $(status).textContent = first ? 'Check the highlighted fields.' : '';
+  if (first) $('#' + first[0]).focus();
+  return !first;
+}
+async function post(url, options, timeout) {
+  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(timeout) });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(data?.error || 'The service could not complete this request. Please try again.');
+  if (!data) throw new TypeError('Incomplete response');
+  return data;
+}
+async function pending(button, label, status, task, recovery) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = label;
+  button.setAttribute('aria-busy', 'true');
+  try { await task(); }
+  catch (error) {
+    $(status).textContent = error instanceof TypeError || ['TimeoutError', 'AbortError'].includes(error.name)
+      ? recovery : error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+    button.removeAttribute('aria-busy');
+  }
+}
 async function checkSession() {
   try {
     const r = await fetch('/api/public/envelopes');
     if (r.ok) { const d = await r.json(); swap(d.sender.name); }
   } catch {}
 }
-function swap(name) {
+function swap(name, focus = false) {
   $('#startcard').style.display = 'none';
   $('#upcard').style.display = '';
   $('#hello').textContent = 'Sending as ' + name;
+  if (focus) $('#title').focus();
 }
-$('#start').onclick = async () => {
-  $('#start').disabled = true;
-  const r = await fetch('/api/public/start', { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: $('#name').value, email: $('#email').value }) });
-  const d = await r.json();
-  $('#start').disabled = false;
-  if (!r.ok) { $('#err').textContent = d.error || 'Try again'; return; }
-  swap(d.name);
+$('#startcard').onsubmit = async event => {
+  event.preventDefault();
+  if ($('#start').disabled) return;
+  const name = $('#name').value.trim(), email = $('#email').value.trim();
+  if (!validate([
+    ['name', name ? '' : 'Enter your name.'],
+    ['email', /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? '' : 'Enter a valid email address.'],
+  ], '#err')) return;
+  await pending($('#start'), 'Opening document upload…', '#err', async () => {
+    const d = await post('/api/public/start', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, email }) }, 20000);
+    if (typeof d.name !== 'string' || !d.name) throw new Error('Your session could not be confirmed. Reload the page to check it.');
+    swap(d.name, true);
+  }, 'Connection interrupted. Reload the page to check your session, then try again if needed.');
 };
-$('#create').onclick = async () => {
+let uploadAttempt = null;
+$('#upcard').onsubmit = async event => {
+  event.preventDefault();
+  if ($('#create').disabled) return;
   const f = $('#file').files[0];
-  if (!$('#title').value.trim() || !f) { $('#err2').textContent = 'Title and a PDF are required.'; return; }
+  const title = $('#title').value.trim();
+  const fileMessage = !f ? 'Choose a PDF document.' : f.size > 15 * 1024 * 1024 ? 'Choose a PDF of 15 MB or less.'
+    : f.size === 0 ? 'This file is empty. Choose a PDF document.'
+    : f.type !== 'application/pdf' && (f.type || !/\.pdf$/i.test(f.name)) ? 'Choose a PDF document.' : '';
+  if (!validate([['title', title ? '' : 'Enter a document title.'], ['file', fileMessage]], '#err2')) return;
   const fd = new FormData();
-  fd.append('title', $('#title').value.trim());
+  fd.append('title', title);
   fd.append('file', f);
-  $('#create').disabled = true;
-  const r = await fetch('/api/public/envelopes', { method: 'POST', body: fd });
-  const d = await r.json();
-  $('#create').disabled = false;
-  if (!r.ok) { $('#err2').textContent = d.error || 'Upload failed.'; return; }
-  location.href = '/e/' + d.id;
+  if (!uploadAttempt || uploadAttempt.file !== f || uploadAttempt.title !== title)
+    uploadAttempt = { file: f, title, key: crypto.randomUUID() };
+  await pending($('#create'), 'Uploading PDF…', '#err2', async () => {
+    const d = await post('/api/public/envelopes', { method: 'POST', headers: { 'Idempotency-Key': uploadAttempt.key }, body: fd }, 120000);
+    if (typeof d.id !== 'string' || !/^[a-f0-9]{32}$/.test(d.id))
+      throw new Error('Upload confirmation is incomplete. Check My envelopes before uploading again.');
+    uploadAttempt = null;
+    location.href = '/e/' + d.id;
+  }, 'Connection interrupted. Check My envelopes before uploading again; your PDF may already be there.');
+};
+for (const id of ['name', 'email', 'title', 'file']) {
+  $('#' + id).addEventListener(id === 'file' ? 'change' : 'input', () => fieldError(id, ''));
+}
+$('#start-free').onclick = () => {
+  const id = $('#startcard').style.display === 'none' ? 'title' : 'name';
+  $('#' + id).focus();
+  window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 };
 checkSession();
 </script>

@@ -1,59 +1,37 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>My envelopes — BL Sign</title><link rel="stylesheet" href="/assets/app.css"></head>
-<body><div class="wrap">
+<body><main class="wrap">
 <div class="topbar">
-  <a href="/" class="muted" style="text-decoration:none">← BL Sign</a>
-  <h1>My envelopes</h1>
-  <span class="sp"></span>
-  <span id="who" class="muted small"></span>
+  <a href="/" class="muted" style="text-decoration:none">← BL Sign</a><h1>My envelopes</h1><span class="sp"></span><span id="who" class="muted small"></span>
 </div>
-<div class="card">
-  <table id="tbl"><thead><tr><th>Title</th><th>Status</th><th>Signed</th><th>Created</th><th></th></tr></thead><tbody></tbody></table>
-  <p id="empty" class="muted" style="display:none">No envelopes yet — <a href="/">send your first one</a>.</p>
-</div>
-<div class="card" id="tplcard" style="display:none">
-  <h3 style="margin-top:0">My templates</h3>
-  <table id="tpltbl"><thead><tr><th>Name</th><th>Pages</th><th></th></tr></thead><tbody></tbody></table>
-  <p class="muted small">Open any envelope and hit "Save as template" to reuse its layout.</p>
-</div>
-<p class="muted small">BL Sign is a <a href="https://blacklabeltec.com/network#bl-sign">BlackLabel Tech product</a> — need custom tools, automation, or AI systems? <a href="https://blacklabeltec.com/custom-software-development">Talk to us</a>.</p>
-</div>
-<script>
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-(async () => {
-  const r = await fetch('/api/public/envelopes');
-  if (!r.ok) { location.href = '/'; return; }
-  const d = await r.json();
-  document.getElementById('who').textContent = d.sender.name + ' · ' + d.sender.email;
-  const tb = document.querySelector('#tbl tbody');
-  document.getElementById('empty').style.display = d.envelopes.length ? 'none' : 'block';
-  for (const e of d.envelopes) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td><a href="/e/${e.id}">${esc(e.title)}</a></td>
-      <td><span class="chip ${e.status}">${e.status}</span></td>
-      <td>${e.n_signed}/${e.n_signers}</td>
-      <td class="muted">${new Date(e.created_at).toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</td>
-      <td>${e.status === 'completed' ? `<a class="btn ghost" href="/api/envelopes/${e.id}/final" target="_blank">Signed PDF</a>` : `<a class="btn ghost" href="/e/${e.id}">Open</a>`}</td>`;
-    tb.appendChild(tr);
-  }
-  const tr2 = await fetch('/api/templates');
-  if (tr2.ok) {
-    const { templates } = await tr2.json();
-    if (templates.length) {
-      document.getElementById('tplcard').style.display = '';
-      const tb2 = document.querySelector('#tpltbl tbody');
-      tb2.innerHTML = templates.map(t => `<tr><td>${esc(t.name)}</td><td>${t.pages || '—'}</td>
-        <td><button data-use="${t.id}">Use</button> <button class="ghost" data-del="${t.id}">Delete</button></td></tr>`).join('');
-      tb2.querySelectorAll('[data-use]').forEach(b => b.onclick = async () => {
-        const res = await fetch(`/api/templates/${b.dataset.use}/use`, { method: 'POST' });
-        const dd = await res.json();
-        if (res.ok) location.href = `/e/${dd.id}`; else alert(dd.error || 'Failed');
-      });
-      tb2.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
-        await fetch(`/api/templates/${b.dataset.del}`, { method: 'DELETE' }); location.reload();
-      });
-    }
-  }
-})();
-</script></body></html>
+<p id="page-message" class="notice" role="status">Opening your envelopes…</p>
+<section class="card recovery" id="recovery" hidden aria-labelledby="recovery-title">
+  <span class="eyebrow">RETURN TO YOUR DOCUMENTS</span><h2 id="recovery-title">Open your envelopes on this device</h2>
+  <p class="muted">Enter the email address you used to send your documents. Confirm it with a one-time code to return to your drafts and signed PDFs.</p>
+  <form id="recover-form" novalidate>
+    <label for="recover-email">Your email address</label>
+    <input id="recover-email" type="email" autocomplete="email" inputmode="email" maxlength="200" placeholder="you@example.com" aria-describedby="recover-message" required>
+    <button id="recover-send" type="submit">Send recovery code</button>
+  </form>
+  <form id="verify-form" hidden novalidate>
+    <label for="recover-code">Six-digit code</label>
+    <input id="recover-code" class="code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" aria-describedby="recover-message" required>
+    <button id="recover-verify" type="submit">Open my envelopes</button><button class="ghost" id="recover-change" type="button">Change email address</button>
+  </form>
+  <p id="recover-message" class="form-message" role="status" aria-live="polite"></p>
+  <p class="muted small">No password or subscription. Codes expire after 10 minutes. Use the newest code. Recovering access signs out your previous sender sessions.</p>
+  <div class="recovery-footer"><span class="muted small">Sending a document for the first time?</span> <a href="/">Start free</a></div>
+</section>
+<section class="card" id="envelopes" hidden aria-label="Your envelopes">
+  <div class="section-heading"><h2>Your documents</h2><a class="btn" href="/">Send a PDF</a><button class="ghost" id="refresh" type="button">Refresh</button></div>
+  <div class="table-scroll"><table id="tbl"><thead><tr><th>Title</th><th>Status</th><th>Signed</th><th>Created</th><th>Actions</th></tr></thead><tbody></tbody></table></div>
+  <div id="empty" class="empty-state" hidden><h3>No envelopes yet</h3><p class="muted">Your documents will appear here after you upload a PDF.</p><a class="btn" href="/">Send your first document</a></div>
+  <p class="muted small" style="margin-top:14px">Drafts are ready to finish. Sent envelopes show each recipient’s progress. Completed envelopes include the signed PDF and its completion certificate.</p>
+</section>
+<section class="card" id="account-data" hidden>
+  <h3 style="margin-top:0">Account data</h3><p class="muted small">Delete every envelope, PDF, signature image, participant record, template, audit event, and this sender account. This cannot be undone.</p>
+  <button class="danger" id="delete-account" type="button" style="margin-top:12px">Delete all account data</button>
+</section>
+<p class="muted small" style="margin-top:26px">BL Sign is a <a href="https://blacklabeltec.com/network#bl-sign">BlackLabel Tech product</a> · <a href="/privacy">Privacy</a> · <a href="/accessibility">Accessibility</a></p>
+</main><script type="module" src="/assets/me.js"></script></body></html>
