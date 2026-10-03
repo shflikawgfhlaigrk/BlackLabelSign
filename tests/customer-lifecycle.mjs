@@ -32,8 +32,8 @@ async function fixture(t, { count = 1, email = 'sender@example.test' } = {}) {
   const { id } = await json(await upload());
   const setup = { signers: Array.from({ length: count }, (_, i) => ({ name: `Synthetic Signer ${i} TEST ONLY`, email: `signer${i}@example.test` })),
     fields: Array.from({ length: count }, (_, i) => [
-      { signer_index: i, type: 'signature', page: 0, x: .08, y: .2 + i * .18, w: .28, h: .08 },
-      { signer_index: i, type: 'text', page: 0, x: .5, y: .2 + i * .18, w: .28, h: .08 },
+      { signer_index: i, type: 'signature', page: 0, x: .08, y: count > 4 ? .16 + i * .085 : .2 + i * .18, w: .28, h: count > 4 ? .055 : .08 },
+      { signer_index: i, type: 'text', page: 0, x: .5, y: count > 4 ? .16 + i * .085 : .2 + i * .18, w: .28, h: count > 4 ? .055 : .08 },
     ]).flat() };
   await json(await sender.request(`/api/envelopes/${id}/setup`, { method: 'PUT', body: setup }));
   const read = () => sender.request(`/api/envelopes/${id}`).then(r => json(r));
@@ -102,6 +102,79 @@ test('local HTTP: tenant ownership, signer document access and private caching a
   await json(await f.send()); const { signers } = await f.read();
   const bad = await f.outsider.request(`/api/session/${signers[0].token}/pdf`); assert.equal(bad.status, 401);
   assert.equal((await f.outsider.request('/api/session/not-a-valid-token')).status, 404);
+});
+
+test('local HTTPS: eight verified sequential signers complete one immutable PDF; a ninth is rejected without mutation or extra quota', async t => {
+  const f = await fixture(t, { count: 8 });
+  const before = await f.read();
+  const objectsBefore = [...f.h.env.DOCS.objects].map(([key, object]) => [key, sha256(object.bytes)]);
+  const nine = { signers: [...f.setup.signers, { name: 'Synthetic Ninth Signer TEST ONLY', email: 'signer8@example.test' }],
+    fields: [...f.setup.fields, { signer_index: 8, type: 'signature', page: 0, x: .08, y: .86, w: .28, h: .055 }] };
+  const rejected = await json(await f.sender.request(`/api/envelopes/${f.id}/setup`, { method: 'PUT', body: nine }), 400);
+  assert.match(rejected.error, /8|too many|signers/i);
+  assert.deepEqual(await f.read(), before);
+  assert.deepEqual([...f.h.env.DOCS.objects].map(([key, object]) => [key, sha256(object.bytes)]), objectsBefore);
+  assert.equal(f.h.env.DB.sql.prepare("SELECT COUNT(*) n FROM abuse_usage WHERE kind='envelope'").get().n, 1);
+
+  const sent = await json(await f.send());
+  assert.equal(sent.signers.length, 8); assert.equal(sent.delivery.accepted, 1); assert.equal(sent.delivery.deferred, 7);
+  const recipients = [];
+  for (let i = 0; i < 8; i++) {
+    const current = recipients[i] || await f.authenticate(i); recipients[i] = current;
+    const state = await json(await current.client.request(current.path));
+    assert.equal(state.myTurn, true, `signer ${i} must become eligible in sequence`);
+    assert.equal(state.fields.length, 2); assert.equal(state.signer.consented, false);
+    if (i < 7) {
+      const future = await f.authenticate(i + 1); recipients[i + 1] = future;
+      const waiting = await json(await future.client.request(future.path));
+      assert.equal(waiting.myTurn, false); assert.equal(waiting.waitingOn, current.signer.name);
+      assert.equal((await f.consent(future)).status, 400);
+      assert.equal((await f.complete(future, i + 1)).status, 400);
+      assert.equal(f.h.inbox.messages(future.signer.email).filter(r => r.mail.subject.startsWith('Signature requested:')).length, 0);
+      const pending = await f.read(); assert.equal(pending.signers[i + 1].status, 'pending');
+      assert.ok(pending.fields.filter(field => field.signer_id === future.signer.id).every(field => field.value === null));
+    }
+    await json(await f.consent(current));
+    const result = await json(await f.complete(current, i)); assert.equal(result.completed, i === 7);
+    const accepted = await f.read(); assert.equal(accepted.signers.filter(s => s.status === 'signed').length, i + 1);
+    assert.equal(accepted.envelope.status, i === 7 ? 'completed' : 'sent');
+    if (i < 7) {
+      assert.equal(result.nextDelivery.state, 'accepted');
+      assert.equal((await json(await recipients[i + 1].client.request(recipients[i + 1].path))).myTurn, true);
+      assert.equal((await current.client.request(current.path + '/download')).status, 409);
+    }
+  }
+
+  const final = await f.read(); assert.equal(final.signers.length, 8);
+  for (const type of ['email-authenticated', 'consented', 'signed']) assert.equal(final.events.filter(e => e.type === type).length, 8, type);
+  assert.equal(final.events.filter(e => e.type === 'completed').length, 1);
+  assert.equal(final.envelope.original_sha256, sha256(f.pdf));
+  const response = await f.sender.request(`/api/envelopes/${f.id}/final`); assert.equal(response.status, 200);
+  const bytes = Buffer.from(await response.arrayBuffer()); assert.equal(sha256(bytes), final.envelope.final_sha256);
+  assert.notEqual(sha256(bytes), sha256(f.pdf));
+  const loading = getDocument({ data: Uint8Array.from(bytes), disableFontFace: true,
+    standardFontDataUrl: new URL('../node_modules/pdfjs-dist/standard_fonts/', import.meta.url).pathname });
+  const document = await loading.promise; assert.ok(document.numPages >= 2);
+  let certificate = '';
+  for (let page = 2; page <= document.numPages; page++) certificate += ' ' + (await (await document.getPage(page)).getTextContent()).items.map(item => item.str).join(' ');
+  assert.match(certificate, /CERTIFICATE OF COMPLETION/); assert.ok(certificate.includes(f.id)); assert.ok(certificate.includes(sha256(f.pdf)));
+  for (const signer of final.signers) {
+    assert.ok(certificate.includes(signer.name)); assert.ok(certificate.includes(signer.email));
+    assert.ok(certificate.includes(signer.consent_at)); assert.ok(certificate.includes(signer.signed_at));
+  }
+  await loading.destroy();
+  for (const recipient of recipients) {
+    const downloaded = await recipient.client.request(recipient.path + '/download'); assert.equal(downloaded.status, 200);
+    assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), bytes);
+    const mail = f.h.inbox.messages(recipient.signer.email);
+    assert.equal(mail.filter(r => r.mail.subject.startsWith('Signature requested:')).length, 1);
+    assert.equal(mail.filter(r => r.mail.subject.startsWith('Your BL Sign verification code:')).length, 1);
+    assert.equal(mail.filter(r => r.mail.subject.startsWith('Completed:')).length, 1);
+  }
+  assert.equal(f.h.inbox.accepted.length, 24); assert.equal(f.h.inbox.received.length, 24);
+  assert.equal(f.h.env.DB.sql.prepare('SELECT COUNT(*) n FROM envelopes').get().n, 1);
+  assert.equal(f.h.env.DB.sql.prepare("SELECT COUNT(*) n FROM abuse_usage WHERE kind='envelope'").get().n, 1);
+  assert.equal([...f.h.env.DOCS.objects.keys()].filter(key => key.startsWith('final/')).length, 1);
 });
 
 test('local HTTP: concurrent uploads share the three-envelope daily quota across same-email sessions and deletion', async t => {
