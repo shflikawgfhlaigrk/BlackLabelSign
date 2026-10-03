@@ -1,0 +1,9 @@
+# Local fixture input only. This template contains no credential and grants no access.
+# The private harness supplies a deterministic synthetic SESSION_SECRET.
+# For a real private remote environment, the owner supplies an existing approved
+# secret through the platform's protected secret input; never commit its value.
+SESSION_SECRET=
+# Optional private admin access; leave unset for the public self-serve review.
+# ADMIN_TOKEN=
+# Optional existing SalesSwipe bridge; unrelated to the public self-serve review.
+# ESTATE_BRIDGE_TOKEN=

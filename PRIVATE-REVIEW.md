@@ -1,0 +1,19 @@
+# BL Sign private candidate
+
+This isolated branch preserves the Aug 8 Git baseline and the newer local signing-integrity, abuse-protection, legal-page and estate-integration edits. The original checkout is untouched.
+
+Run `npm run preview:private` from this checkout. The founder review route is `http://localhost:8788/`; `http://localhost:8788/me` opens session recovery. The loopback HTTP adapter models TLS termination only for the private harness. HTTPS acceptance tests use the unmodified Worker request path, a clearly synthetic untrusted certificate and isolated browser context. Neither route changes system trust or permissions.
+
+The preview executes the actual Worker and every schema migration with local SQLite and an isolated object store. It accepts only `.test`/`.invalid` recipients. Email is collected in a local sandbox inbox at `/__sandbox/inbox`; this is simulated provider/sink evidence, never external inbox delivery. All documents and parties must remain synthetic, labeled TEST ONLY — NOT A CONTRACT. Reload, new-device recovery, quota limits and failed requests are supported in the preview. Preview data is disposable and resets on process restart; production durability is not established by that process.
+
+Use a new browser session to enter a synthetic name and `sender@example.test`, upload the labeled test PDF from the acceptance evidence folder, place signatures for up to eight synthetic sequential recipients, and send. Each recipient opens its link in a fresh browser session, requests a code, reads it in the sandbox inbox and signs. After the last signer, retrieve the PDF and audit certificate. Open `/me` in another browser session and recover sender access through its email code. Recovery signs out prior sender sessions.
+
+The public offer remains three free envelopes per UTC day, PDF input, up to eight sequential signers, no subscription, and no recipient account. Public templates, reminders, decline, CC and parallel routing remain unavailable; legacy data can still be read or explicitly removed through authorized sessions.
+
+Focused checks are `test:lifecycle`, `test:security`, `test:browser`, plus the changed PNG/landing/integrity and private-preflight checks. They are bounded behavioral checks, not the Ace test battery. The final evidence packet binds test results to the source commit and hashes.
+
+G1: scope and desktop/mobile preview; local access verified; production metadata checked without mutations. G2: integrated private code and UI. G3: independent fresh-browser/API/security/recovery evidence; real external mail remains a separate unmet requirement until an already approved recipient and provider-supported receipt path are established. G4: founder acceptance of the exact candidate, filming, final regression and authorized public release through the shared Ship lane. These are the only four gates. The only outcome labels are NOT DONE, DONE and WORKING LIVE.
+
+Live read-only metadata confirms DB, DOCS, ASSETS, EMAIL, SESSION_SECRET, ADMIN_TOKEN and ESTATE_BRIDGE_TOKEN binding names. Their values were not printed. This establishes configuration presence, not email delivery or production customer readiness. Preserve the currently deployed social/localization/discovery modules; this candidate's core Worker must not overwrite them. `deploy.sh` fails closed pending the shared Ship gate. No production migrations, settings, secrets, public transactions or email sends were performed by this repair.
+
+Parent owns shared HQ/Team/Ship release-contract integration. The local readiness receipt records the exact unresolved evidence, owner and next check. No founder-only action is required for the local synthetic preview; an approved controlled external recipient and final founder acceptance are required for the corresponding live-mail and release steps.

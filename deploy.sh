@@ -1,10 +1,6 @@
-#!/bin/bash
-# BL Sign deploy — brand-isolation gate is fail-closed (founder directive 2026-07-12).
+#!/usr/bin/env bash
+# Public release belongs to the shared Ship gate and wrapper-preserving lane.
+# This private candidate has no direct deployment or permission-bypass switch.
 set -euo pipefail
-cd "$(dirname "$0")"
-# Declared exception: TEC is the umbrella brand and the live blacklabeltec.com
-# site already surfaces michael@blacklabelbots.com as the canonical contact.
-ALLOW=(--allow-term 'michael@blacklabelbots.com')
-node ~/BlackLabel-Team/tools/check-brand-isolation.mjs public --self blacklabeltec.com "${ALLOW[@]}"
-node ~/BlackLabel-Team/tools/check-brand-isolation.mjs src --self blacklabeltec.com "${ALLOW[@]}"
-npx wrangler deploy
+printf '%s\n' 'NOT DONE — public release requires founder acceptance of the exact candidate and the shared Ship command preserving live routing modules.' >&2
+exit 1

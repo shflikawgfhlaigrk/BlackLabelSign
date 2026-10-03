@@ -14,12 +14,12 @@ run_worker_first = true
 
 [[d1_databases]]
 binding = "DB"
-database_name = "bl-sign"
-database_id = "da4face0-64be-41f5-be38-9efb6576e013"
+database_name = "bl-sign-day1-20260913"
+database_id = "f173ebb5-55f4-459a-83e9-e4b8b52b6704"
 
 [[r2_buckets]]
 binding = "DOCS"
-bucket_name = "bl-sign-docs"
+bucket_name = "bl-sign-docs-day1-20260913"
 
 [observability]
 enabled = true
