@@ -8,6 +8,8 @@
     "preview:private": "node scripts/private-preview.mjs",
     "preflight": "node scripts/preflight.mjs",
     "test:lifecycle": "node --test --test-timeout=15000 tests/customer-lifecycle.mjs",
+    "test:private-email": "node --test --test-timeout=15000 tests/private-email-transport.mjs",
+    "preview:private:email": "node scripts/private-email-review.mjs",
     "test:security": "node --test --test-timeout=15000 tests/security-lifecycle.mjs tests/auth-revocation.mjs",
     "test:browser": "node tests/customer-browser.mjs"
   },

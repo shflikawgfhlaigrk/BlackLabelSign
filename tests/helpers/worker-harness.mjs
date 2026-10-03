@@ -129,13 +129,22 @@ export async function createHarness({ origin = 'https://localhost', database = '
   return { worker, env, inbox, request, close, sourceHash: sha256(readFileSync(workerPath)) };
 }
 
-export async function serveHarness({ port = 0, transport = 'https' } = {}) {
+export async function serveHarness({ port = 0, transport = 'https', requestHook } = {}) {
   if (!['https', 'http'].includes(transport)) throw new Error('Local preview transport must be https or http');
   const harness = await createHarness();
   // Deliberately untrusted, static synthetic TLS material; no system trust or
   // deployed credentials are changed. Clients trust this loopback fixture only.
   const handler = async (req, res) => {
     try {
+      // An optional private tooling hook is outside the exact Worker. It never
+      // changes product routes unless the caller explicitly handles one.
+      const privateResponse = requestHook ? await requestHook(req, harness) : null;
+      if (privateResponse) {
+        res.statusCode = privateResponse.status;
+        privateResponse.headers.forEach((value, key) => { if (key !== 'set-cookie') res.setHeader(key, value); });
+        const cookies = privateResponse.headers.getSetCookie(); if (cookies.length) res.setHeader('set-cookie', cookies);
+        res.end(Buffer.from(await privateResponse.arrayBuffer())); return;
+      }
       // Test receipt access is loopback-only and is never part of the Worker.
       if (req.url === '/__sandbox/inbox' && req.method === 'GET') {
         res.setHeader('content-type', 'application/json');
