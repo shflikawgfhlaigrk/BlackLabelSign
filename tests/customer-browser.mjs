@@ -155,7 +155,9 @@ try {
   await editorRecovery.locator('#verify-form').waitFor({ state: 'visible' });
   await editorRecovery.locator('#recover-code').fill(harness.inbox.latestCode('sender-browser@example.test')); await editorRecovery.locator('#recover-verify').click();
   await editorRecovery.waitForURL(new RegExp(`/e/${id}$`)); await editorRecovery.locator('#links').waitFor({ state: 'visible' });
-  check('Verified editor recovery returns to the exact requested completed document'); await screenshot(editorRecovery, 'editor-recovered-document');
+  await editorRecovery.locator('.pagebox canvas').first().waitFor({ state: 'visible' });
+  await editorRecovery.locator('#editor-message', { hasText: 'This envelope is closed for editing.' }).waitFor({ state: 'visible' });
+  check('Verified editor recovery renders the exact completed document and settled closed-editing status'); await screenshot(editorRecovery, 'editor-recovered-document');
   for (const [name, requestedReturn] of [
     ['external authority', 'https://attacker.example/e/' + id],
     ['JavaScript scheme', 'javascript:globalThis.__unsafeRecovery=true'],
