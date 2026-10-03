@@ -156,6 +156,23 @@ try {
   await editorRecovery.locator('#recover-code').fill(harness.inbox.latestCode('sender-browser@example.test')); await editorRecovery.locator('#recover-verify').click();
   await editorRecovery.waitForURL(new RegExp(`/e/${id}$`)); await editorRecovery.locator('#links').waitFor({ state: 'visible' });
   check('Verified editor recovery returns to the exact requested completed document'); await screenshot(editorRecovery, 'editor-recovered-document');
+  for (const [name, requestedReturn] of [
+    ['external authority', 'https://attacker.example/e/' + id],
+    ['JavaScript scheme', 'javascript:globalThis.__unsafeRecovery=true'],
+    ['encoded authority', '/%2f%2fattacker.example/e/' + id],
+  ]) {
+    const blockedContext = await context(), blocked = await blockedContext.newPage();
+    await blocked.goto(harness.origin + '/me?return=' + encodeURIComponent(requestedReturn));
+    await blocked.locator('#recovery').waitFor({ state: 'visible' });
+    await blocked.locator('#recover-email').fill('sender-browser@example.test'); await blocked.locator('#recover-send').click();
+    await blocked.locator('#verify-form').waitFor({ state: 'visible' });
+    await blocked.locator('#recover-code').fill(harness.inbox.latestCode('sender-browser@example.test')); await blocked.locator('#recover-verify').click();
+    await blocked.locator('#tbl tbody tr').first().waitFor({ state: 'visible' });
+    check('Verified recovery rejects ' + name + ' return and stays on My envelopes',
+      new URL(blocked.url()).origin === harness.origin && new URL(blocked.url()).pathname === '/me' &&
+      !(await blocked.evaluate(() => globalThis.__unsafeRecovery)));
+    await blockedContext.close();
+  }
   const invalidContext = await context(), invalid = await invalidContext.newPage();
   await invalid.goto(harness.origin + '/s/invalid'); await invalid.locator('#statuscard').waitFor({ state: 'visible' });
   check('Invalid recipient link produces an explicit usable error', /Link not valid|invalid|expired/i.test(await invalid.locator('#statuscard').innerText()));

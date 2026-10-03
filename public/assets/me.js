@@ -2,7 +2,7 @@ const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let challengeId = null, busy = false;
 const requestedReturn = new URLSearchParams(location.search).get('return');
-const returnPath = /^\/e\/[a-f0-9]{32}$/.test(requestedReturn || '') ? requestedReturn : null;
+const returnEnvelopeId = /^\/e\/([a-f0-9]{32})$/.exec(requestedReturn || '')?.[1] || null;
 
 async function request(url, options = {}) {
   const response = await fetch(url, { ...options, signal: AbortSignal.timeout(30000) });
@@ -82,7 +82,13 @@ $('#verify-form').onsubmit = async event => {
   try {
     const { response, body } = await request('/api/public/recover/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challenge_id: challengeId, code }) });
     if (!response.ok || !body.ok) { recoveryMessage(failure(response, body, 'That code is invalid, expired, or already used. Request a new code.'), true); $('#recover-code').focus(); return; }
-    if (returnPath) { location.href = returnPath; return; }
+    if (returnEnvelopeId) {
+      // Clear the recovery query without navigating; pathname assignment cannot
+      // change the current origin or interpret an input as a URL scheme.
+      history.replaceState(null, '', '/me');
+      location.pathname = '/e/' + returnEnvelopeId;
+      return;
+    }
     await loadEnvelopes();
     if (!$('#recovery').hidden) recoveryMessage('The code was accepted, but access could not be confirmed. Enable cookies for BL Sign and refresh this page.', true);
   } catch { recoveryMessage('Connection interrupted. Refresh this page to check whether access was restored before requesting another code.', true); }
