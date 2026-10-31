@@ -24,6 +24,21 @@ async function sha256hex(buf) {
 const AUTH_CODE_TTL_MS = 10 * 60_000;
 const AUTH_SESSION_TTL_MS = 12 * 60 * 60_000;
 const AUTH_CODE_RESEND_MS = 60_000;
+function verificationCode() {
+  const bytes = new Uint8Array(6);
+  let code = '';
+  while (code.length < 6) {
+    crypto.getRandomValues(bytes);
+    for (const byte of bytes) {
+      // 250 has exactly 25 preimages for each decimal digit. Discard the
+      // remaining six byte values rather than making digits 0-5 more likely.
+      if (byte >= 250) continue;
+      code += String(byte % 10);
+      if (code.length === 6) break;
+    }
+  }
+  return code;
+}
 const textBytes = value => new TextEncoder().encode(String(value));
 const authCookieName = signer => `blsa_${signer.id.slice(0, 24)}`;
 const maskedEmail = value => {
@@ -674,7 +689,7 @@ export default {
             AND (auth_code_sent_at IS NULL OR auth_code_sent_at<=?)`)
             .bind(claimedAt, signer.id, new Date(Date.now() - AUTH_CODE_RESEND_MS).toISOString()).run();
           if (!claim.meta.changes) return bad('wait one minute before requesting another code', 429);
-          const code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, '0');
+          const code = verificationCode();
           const expiresAt = new Date(Date.now() + AUTH_CODE_TTL_MS).toISOString();
           const hash = await authCodeHash(env, signer, code);
           await env.DB.prepare(`UPDATE signers SET auth_code_hash=?, auth_code_expires_at=?, auth_failures=0 WHERE id=?`)
